@@ -216,7 +216,15 @@ interface AppContextType {
     bottleTypeId: string,
     delta: number,
     customChangeType?: 'add' | 'remove' | 'return' | 'factory',
-    customNote?: string
+    customNote?: string,
+    customMeta?: {
+      truckId?: string;
+      supplierId?: string;
+      blReference?: string;
+      driverId?: string;
+      driverName?: string;
+      operationId?: string;
+    }
   ) => Promise<void>;
   defectiveStock: DefectiveBottle[];
   addDefectiveStock: (stock: DefectiveBottle) => Promise<void>;
@@ -1229,7 +1237,15 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     bottleTypeId: string, 
     delta: number, 
     customChangeType?: 'add' | 'remove' | 'return' | 'factory',
-    customNote?: string
+    customNote?: string,
+    customMeta?: {
+      truckId?: string;
+      supplierId?: string;
+      blReference?: string;
+      driverId?: string;
+      driverName?: string;
+      operationId?: string;
+    }
   ) => {
     if (!delta) return;
     const idx = emptyBottlesStock.findIndex(s => s.bottleTypeId === bottleTypeId);
@@ -1257,6 +1273,60 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
+    // Also update BottleType totalQuantity if this is an asset increase (Add Stock)
+    // Only if changeType is 'add' (or implied add)
+    const type = customChangeType || (delta > 0 ? 'add' : 'remove');
+    if (type === 'add' && delta > 0) {
+       const bt = bottleTypes.find(b => b.id === bottleTypeId);
+       if (bt) {
+         const newTotal = (bt.totalQuantity || 0) + delta;
+         // We also update remainingQuantity in bottle_types table to keep it in sync with empty_bottles_stock
+         // Although Dashboard calculates it, having it correct in DB is good.
+         // However, bottle_types.remainingQuantity usually tracks "Warehouse Stock".
+         // empty_bottles_stock IS the warehouse stock for empties.
+         // So we should update bottle_types.remainingQuantity too.
+         const newRemaining = (bt.remainingQuantity || 0) + delta;
+         
+         await updateBottleType(bottleTypeId, { 
+           totalQuantity: newTotal,
+           remainingQuantity: newRemaining
+         });
+       }
+    } else if (type === 'remove' && delta < 0) {
+       // If we remove stock (e.g. lost, destroyed), we should reduce totalQuantity?
+       // Or if we just move it to truck?
+       // If moving to truck, it's 'distribution', not 'remove' from assets.
+       // Usually 'remove' here means "Exit Warehouse".
+       // If it exits to Truck, totalQuantity stays same.
+       // If it exits to Destroy/Lost, totalQuantity decreases.
+       // But this function doesn't know the destination.
+       // However, 'updateEmptyBottlesStockByBottleType' is generic.
+       // If called by 'Supply' (Load Truck), it should NOT reduce totalQuantity.
+       // Supply usually calls updateEmptyBottlesStockByBottleType?
+       // Let's check Supply logic.
+    }
+
+    const noteParts: string[] = [];
+    if (customMeta?.truckId) {
+      const truckName = trucks.find(t => t.id === customMeta.truckId)?.name;
+      noteParts.push(`Camion: ${truckName || customMeta.truckId}`);
+    }
+    if (customMeta?.supplierId) {
+      const supplierName = suppliers.find(s => s.id === customMeta.supplierId)?.name;
+      noteParts.push(`Fournisseur: ${supplierName || customMeta.supplierId}`);
+    }
+    if (customMeta?.driverName) {
+      noteParts.push(`Chauffeur: ${customMeta.driverName}`);
+    }
+    if (customMeta?.blReference) {
+      noteParts.push(`BL: ${customMeta.blReference}`);
+    }
+    if (customMeta?.operationId) {
+      noteParts.push(`Opération: ${customMeta.operationId}`);
+    }
+    const baseNote = customNote || `Mise à jour automatique du stock vide`;
+    const finalNote = noteParts.length ? `${baseNote} | ${noteParts.join(' | ')}` : baseNote;
+
     await addStockHistory({
       date: now,
       bottleTypeId,
@@ -1266,7 +1336,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       quantity: Math.abs(delta),
       previousQuantity,
       newQuantity: nextQuantity,
-      note: customNote || `Mise à jour automatique du stock vide`
+      note: finalNote
     });
   };
 

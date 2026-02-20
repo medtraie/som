@@ -857,7 +857,10 @@ const Factory = () => {
         settlementForm.bottleTypeId, 
         settlementForm.quantity,
         'factory',
-        `Règlement dette - ${safeSuppliers.find(s => s.id === settlementForm.supplierId)?.name || 'Fournisseur inconnu'}`
+        `Règlement dette - ${safeSuppliers.find(s => s.id === settlementForm.supplierId)?.name || 'Fournisseur inconnu'}`,
+        {
+          supplierId: settlementForm.supplierId
+        }
       );
     } else {
       updateSupplierDebt(settlementForm.supplierId, settlementForm.bottleTypeId, 0, -settlementForm.quantity);
@@ -1010,7 +1013,13 @@ const Factory = () => {
           bottle.bottleTypeId, 
           -bottle.emptyQuantity,
           'factory',
-          `Envoi usine - ${truck.name} - ${safeSuppliers.find(s => s.id === sendForm.supplierId)?.name || 'Fournisseur inconnu'}`
+          `Envoi usine - ${truck.name} - ${safeSuppliers.find(s => s.id === sendForm.supplierId)?.name || 'Fournisseur inconnu'}`,
+          {
+            truckId: sendForm.truckId,
+            supplierId: sendForm.supplierId,
+            blReference: sendForm.blReference,
+            driverName: driver?.name
+          }
         );
         // Supplier owes us empty bottles in return
         if (sendForm.supplierId) {
@@ -1154,7 +1163,13 @@ const Factory = () => {
           bottle.bottleTypeId, 
           bottle.quantity,
           'factory',
-          `Retour usine - ${operation.blReference || 'BL Inconnu'} - ${safeSuppliers.find(s => s.id === operation.supplierId)?.name || 'Fournisseur inconnu'}`
+          `Retour usine - ${operation.blReference || 'BL Inconnu'} - ${safeSuppliers.find(s => s.id === operation.supplierId)?.name || 'Fournisseur inconnu'}`,
+          {
+            truckId: operation.truckId,
+            supplierId: operation.supplierId,
+            blReference: operation.blReference,
+            operationId: String(operation.id)
+          }
         );
       }
     });

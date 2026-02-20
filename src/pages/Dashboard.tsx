@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,7 +25,8 @@ import {
   Fuel,
   Droplets,
   Wrench,
-  CreditCard
+  CreditCard,
+  TrendingDown
 } from 'lucide-react';
 
 const Dashboard = () => {
@@ -37,45 +38,129 @@ const Dashboard = () => {
     transactions = [],
     expenses = [],
     repairs = [],
-    financialTransactions = []
+    financialTransactions = [],
+    revenues = [],
+    emptyBottlesStock = [], // Add emptyBottlesStock
+    cashOperations = [] // Add cashOperations
   } = useApp();
 
-  const getTotalQuantity = (bt: any) => {
-    const rawTotal = bt?.totalQuantity;
-    if (rawTotal === null || rawTotal === undefined || isNaN(Number(rawTotal))) {
-      const remaining = Number(bt?.remainingQuantity || 0);
-      const distributed = Number(bt?.distributedQuantity || 0);
-      return remaining + distributed;
-    }
-    return Number(rawTotal) || 0;
+  // Debug logging
+  console.log('Dashboard Data:', { 
+    bottleTypesCount: bottleTypes.length,
+    emptyBottlesStockCount: emptyBottlesStock.length,
+    financialTransactionsCount: financialTransactions.length,
+    revenuesCount: revenues.length
+  });
+
+  const getStockMetrics = (bt: any) => {
+    // Calculate stock metrics dynamically to ensure accuracy
+    const warehouseFull = Number(bt?.remainingQuantity || 0);
+    const distributed = Number(bt?.distributedQuantity || 0);
+    
+    // Find empty stock for this bottle type
+    const emptyStockEntry = emptyBottlesStock.find(s => s.bottleTypeId === bt.id);
+    const warehouseEmpty = Number(emptyStockEntry?.quantity || 0);
+    
+    // Total Assets = Full (Warehouse) + Empty (Warehouse) + Distributed (Circulation)
+    const totalAssets = warehouseFull + warehouseEmpty + distributed;
+    const fullAssets = warehouseFull + distributed;
+    
+    return {
+      warehouseFull,
+      warehouseEmpty,
+      distributed,
+      fullAssets,
+      totalAssets
+    };
   };
 
   const getRemainingQuantity = (bt: any) => {
-    const rawRemaining = bt?.remainingQuantity;
-    if (rawRemaining === null || rawRemaining === undefined || isNaN(Number(rawRemaining))) {
-      const total = getTotalQuantity(bt);
-      const distributed = Number(bt?.distributedQuantity || 0);
-      return Math.max(0, total - distributed);
-    }
-    return Number(rawRemaining) || 0;
+    const { warehouseFull } = getStockMetrics(bt);
+    return warehouseFull;
+  };
+
+  const getTotalQuantity = (bt: any) => {
+    const { totalAssets } = getStockMetrics(bt);
+    return totalAssets;
+  };
+
+  const isLowStock = (bt: any) => {
+    const { warehouseFull, totalAssets } = getStockMetrics(bt);
+    if (!totalAssets || totalAssets <= 0) return false;
+    // Alert if ready-to-sell stock is low (< 20% of total assets) AND absolute quantity is low (< 50 units)
+    // This prevents alerts when we have enough stock but just a lot distributed
+    const ratio = warehouseFull / totalAssets;
+    return ratio < 0.2 && warehouseFull < 50;
   };
 
   // Calculate metrics
-  const totalStock = bottleTypes.reduce((sum, bt) => sum + getRemainingQuantity(bt), 0);
-  const totalValue = bottleTypes.reduce((sum, bt) => sum + (getRemainingQuantity(bt) * (Number(bt.unitPrice) || 0)), 0);
-  const activeTrucks = trucks.filter(t => t.isActive).length;
-  const totalDriverDebt = drivers.reduce((sum, d) => sum + Math.abs(d.debt || 0), 0);
-  const lowStockBottles = bottleTypes.filter(bt => getRemainingQuantity(bt) < 50);
+  // Stock Total represents total assets (Full + Empty + Distributed)
+  const totalStock = useMemo(() => {
+    return bottleTypes.reduce((sum, bt) => {
+      const { totalAssets } = getStockMetrics(bt);
+      return sum + totalAssets;
+    }, 0);
+  }, [bottleTypes, emptyBottlesStock]);
   
-  const totalExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
-    repairs.reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
-  const totalIn = financialTransactions
-    .filter(t => t.type === 'encaissement' || t.type === 'versement')
-    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-  const totalOut = financialTransactions
-    .filter(t => t.type === 'retrait' || t.type === 'dépense' || t.type === 'réparation')
-    .reduce((sum, t) => sum + Math.abs(Number(t.amount) || 0), 0);
-  const totalRevenue = totalIn - totalOut;
+  const totalValue = useMemo(() => bottleTypes.reduce((sum, bt) => {
+    const { warehouseFull } = getStockMetrics(bt);
+    return sum + (warehouseFull * (Number(bt.unitPrice) || 0));
+  }, 0), [bottleTypes, emptyBottlesStock]);
+
+  const activeTrucks = trucks.filter(t => t.isActive).length;
+  const totalDriverDebt = useMemo(() => drivers.reduce((sum, d) => sum + Math.abs(d.debt || 0), 0), [drivers]);
+  
+  // Use percentage < 20% for low stock alert
+  // Alert based on Full Bottles availability vs Total Assets
+  const lowStockBottles = bottleTypes.filter(bt => isLowStock(bt));
+  
+  const totalExpenses = useMemo(() => 
+    expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
+    repairs.reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0),
+  [expenses, repairs]);
+
+  const { totalRevenue, netBalance } = useMemo(() => {
+    // 1. Financial Transactions (New System)
+    const finRevenue = financialTransactions
+      .filter(t => t.type === 'encaissement' || t.type === 'versement')
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+      
+    const finExpenses = financialTransactions
+      .filter(t => t.type === 'retrait' || t.type === 'dépense' || t.type === 'réparation')
+      .reduce((sum, t) => sum + Math.abs(Number(t.amount) || 0), 0);
+
+    // 2. Driver Payments (Transactions table)
+    // Include 'payment' and 'credit' types as per Drivers page logic
+    const driverPayments = transactions
+      .filter(t => t.type === 'payment' || t.type === 'credit')
+      .reduce((sum, t) => {
+        // Handle various amount fields
+        const val = t.amount ?? t.montant ?? t.value ?? t.totalValue ?? 0;
+        return sum + (Number(val) || 0);
+      }, 0);
+
+    // 3. Manual Revenues (Legacy)
+    const legacyRevenue = revenues.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
+    
+    // 4. Expenses (Legacy)
+    const legacyExpenses = 
+      expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
+      repairs.reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
+
+    // Aggregation Strategy:
+    // Revenue = Driver Payments + Manual Revenues + Financial Transactions (encaissement)
+    // We assume these are distinct entries. 
+    // If a driver payment is manually entered in revenues, it might duplicate, but usually systems are separate.
+    // Financial Transactions are likely distinct from legacy transactions.
+    
+    const finalRevenue = driverPayments + legacyRevenue + finRevenue;
+    const finalExpenses = legacyExpenses + finExpenses;
+    
+    return { 
+      totalRevenue: finalRevenue, 
+      netBalance: finalRevenue - finalExpenses 
+    };
+  }, [financialTransactions, revenues, expenses, repairs, transactions]);
   
   const today = new Date().toLocaleDateString('fr-FR', { 
     weekday: 'long', 
@@ -199,8 +284,12 @@ const Dashboard = () => {
                 const remaining = getRemainingQuantity(bottle);
                 const total = getTotalQuantity(bottle);
                 const percentage = Math.min(((remaining || 0) / (total || 1)) * 100, 100);
+                
+                const isCritical = isLowStock(bottle);
+                
                 let color = "bg-green-500";
-                if (percentage < 20) color = "bg-red-500";
+                if (isCritical) color = "bg-red-500";
+                else if (percentage < 20) color = "bg-orange-500";
                 else if (percentage < 50) color = "bg-yellow-500";
 
                 return (
@@ -208,7 +297,7 @@ const Dashboard = () => {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-sm">{bottle.name}</span>
-                        {(bottle.remainingQuantity || 0) < 50 && (
+                        {isCritical && (
                           <Badge variant="destructive" className="h-5 px-1.5 text-[10px] animate-pulse">
                             ALERTE
                           </Badge>
@@ -383,7 +472,7 @@ const Dashboard = () => {
                   <div key={bottle.id} className="flex items-center justify-between p-2 bg-white rounded-lg shadow-sm border border-red-100">
                     <span className="text-sm font-medium">{bottle.name}</span>
                     <Badge variant="destructive" className="font-bold">
-                      {bottle.remainingQuantity} restants
+                      {getRemainingQuantity(bottle)} restants
                     </Badge>
                   </div>
                 ))}
@@ -409,7 +498,7 @@ const Dashboard = () => {
                 </div>
               </div>
               <div className="pt-2">
-                <p className="text-3xl font-bold">{(totalRevenue - totalExpenses).toLocaleString()} DH</p>
+                <p className="text-3xl font-bold">{netBalance.toLocaleString()} DH</p>
                 <p className="text-xs opacity-70">Balance estimée (Revenus - Dépenses)</p>
               </div>
             </CardContent>
