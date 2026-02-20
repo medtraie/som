@@ -37,18 +37,45 @@ const Dashboard = () => {
     transactions = [],
     expenses = [],
     repairs = [],
-    fuelManagement = []
+    financialTransactions = []
   } = useApp();
 
+  const getTotalQuantity = (bt: any) => {
+    const rawTotal = bt?.totalQuantity;
+    if (rawTotal === null || rawTotal === undefined || isNaN(Number(rawTotal))) {
+      const remaining = Number(bt?.remainingQuantity || 0);
+      const distributed = Number(bt?.distributedQuantity || 0);
+      return remaining + distributed;
+    }
+    return Number(rawTotal) || 0;
+  };
+
+  const getRemainingQuantity = (bt: any) => {
+    const rawRemaining = bt?.remainingQuantity;
+    if (rawRemaining === null || rawRemaining === undefined || isNaN(Number(rawRemaining))) {
+      const total = getTotalQuantity(bt);
+      const distributed = Number(bt?.distributedQuantity || 0);
+      return Math.max(0, total - distributed);
+    }
+    return Number(rawRemaining) || 0;
+  };
+
   // Calculate metrics
-  const totalStock = bottleTypes.reduce((sum, bt) => sum + (bt.remainingQuantity || 0), 0);
-  const totalValue = bottleTypes.reduce((sum, bt) => sum + ((bt.remainingQuantity || 0) * (bt.unitPrice || 0)), 0);
+  const totalStock = bottleTypes.reduce((sum, bt) => sum + getRemainingQuantity(bt), 0);
+  const totalValue = bottleTypes.reduce((sum, bt) => sum + (getRemainingQuantity(bt) * (Number(bt.unitPrice) || 0)), 0);
   const activeTrucks = trucks.filter(t => t.isActive).length;
   const totalDriverDebt = drivers.reduce((sum, d) => sum + Math.abs(d.debt || 0), 0);
-  const lowStockBottles = bottleTypes.filter(bt => (bt.remainingQuantity || 0) < 50);
+  const lowStockBottles = bottleTypes.filter(bt => getRemainingQuantity(bt) < 50);
   
-  const totalExpenses = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-  const totalRevenue = transactions.reduce((sum, t) => sum + (t.totalValue || t.totalVentes || 0), 0);
+  const totalExpenses = expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
+    repairs.reduce((sum, r) => sum + (Number(r.paidAmount) || 0), 0);
+  const totalIn = financialTransactions
+    .filter(t => t.type === 'encaissement' || t.type === 'versement')
+    .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+  const totalOut = financialTransactions
+    .filter(t => t.type === 'retrait' || t.type === 'dépense' || t.type === 'réparation')
+    .reduce((sum, t) => sum + Math.abs(Number(t.amount) || 0), 0);
+  const totalRevenue = totalIn - totalOut;
   
   const today = new Date().toLocaleDateString('fr-FR', { 
     weekday: 'long', 
@@ -169,7 +196,9 @@ const Dashboard = () => {
           <CardContent>
             <div className="space-y-6">
               {bottleTypes.map((bottle) => {
-                const percentage = Math.min(((bottle.remainingQuantity || 0) / (bottle.totalQuantity || 1)) * 100, 100);
+                const remaining = getRemainingQuantity(bottle);
+                const total = getTotalQuantity(bottle);
+                const percentage = Math.min(((remaining || 0) / (total || 1)) * 100, 100);
                 let color = "bg-green-500";
                 if (percentage < 20) color = "bg-red-500";
                 else if (percentage < 50) color = "bg-yellow-500";
@@ -186,7 +215,7 @@ const Dashboard = () => {
                         )}
                       </div>
                       <span className="text-sm font-medium text-muted-foreground">
-                        {bottle.remainingQuantity || 0} / {bottle.totalQuantity || 0}
+                        {remaining} / {total}
                       </span>
                     </div>
                     <div className="relative h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">

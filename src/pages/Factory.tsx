@@ -1143,9 +1143,10 @@ const Factory = () => {
     receivedBottles.forEach(bottle => {
       const currentBT = bottleTypes.find(bt => bt.id === bottle.bottleTypeId);
       if (currentBT) {
-        // Update full stock
+        const currentRemaining = Number(currentBT.remainingQuantity || 0);
+        const qty = Number(bottle.quantity || 0);
         updateBottleType(bottle.bottleTypeId, {
-          remainingQuantity: currentBT.remainingQuantity + bottle.quantity
+          remainingQuantity: currentRemaining + qty
         });
         
         // Also update empty stock as requested by user

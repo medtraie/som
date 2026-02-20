@@ -108,9 +108,9 @@ const columnMap: Record<string, Record<string, string>> = {
 const tableColumnHints: Record<string, string[]> = {};
 const resolveColumnName = (table: string, key: string) => {
   const tableMap = columnMap[table] || {};
-  const explicit = tableMap[key];
-  if (explicit) return explicit;
   const columns = tableColumnHints[table] || [];
+  const explicit = tableMap[key];
+  if (explicit && (!columns.length || columns.includes(explicit))) return explicit;
   const normalizedTarget = key.toLowerCase();
   if (columns.length) {
     const direct = columns.find(col => col.toLowerCase() === normalizedTarget);
@@ -124,16 +124,14 @@ const resolveColumnName = (table: string, key: string) => {
     if (candidate) return candidate;
     return null;
   }
-  return null;
+  return explicit ?? null;
 };
 const toWritePayload = (table: string, value: Record<string, any>) => {
   const payload: Record<string, any> = {};
-  const tableMap = columnMap[table] || {};
   const columns = tableColumnHints[table] || [];
   for (const [key, val] of Object.entries(value)) {
     if (val === undefined || (typeof val === 'number' && isNaN(val))) continue;
-    const explicit = tableMap[key];
-    const resolved = explicit || resolveColumnName(table, key);
+    const resolved = resolveColumnName(table, key);
     if (resolved) {
       payload[resolved] = val;
       continue;

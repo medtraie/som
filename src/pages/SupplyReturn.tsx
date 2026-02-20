@@ -299,10 +299,11 @@ const SupplyReturn = () => {
     items.forEach(item => {
       const bottleType = bottleTypes.find(bt => bt.id === item.bottleTypeId);
       if (bottleType) {
-        // Each full bottle counts as 1 empty + 1 full
-        // So we remove fullQuantity from remainingQuantity (pleine)
-        const newRemainingQuantity = bottleType.remainingQuantity - item.fullQuantity;
-        const newDistributedQuantity = bottleType.distributedQuantity + item.fullQuantity;
+        const currentRemaining = Number(bottleType.remainingQuantity || 0);
+        const currentDistributed = Number(bottleType.distributedQuantity || 0);
+        const fullQty = Number(item.fullQuantity || 0);
+        const newRemainingQuantity = currentRemaining - fullQty;
+        const newDistributedQuantity = currentDistributed + fullQty;
         
         updateBottleType(item.bottleTypeId, {
           remainingQuantity: newRemainingQuantity,
@@ -688,13 +689,14 @@ const SupplyReturn = () => {
         const bt = bottleTypes.find(b => b.id === item.bottleTypeId);
         if (!bt) return;
 
-        const fullQty = item.fullQuantity || 0;
+        const fullQty = Number(item.fullQuantity || 0);
 
-        // Increase available stock, decrease distributed, enforce bounds
-        const maxTotal = (bt as any).totalQuantity;
-        const computedRemaining = (bt.remainingQuantity || 0) + fullQty;
-        const newRemaining = typeof maxTotal === 'number' ? Math.min(maxTotal, computedRemaining) : computedRemaining;
-        const newDistributed = Math.max(0, (bt.distributedQuantity || 0) - fullQty);
+        const maxTotal = Number((bt as any).totalQuantity ?? bt.totalQuantity ?? (bt as any).totalquantity ?? 0);
+        const currentRemaining = Number(bt.remainingQuantity || 0);
+        const currentDistributed = Number(bt.distributedQuantity || 0);
+        const computedRemaining = currentRemaining + fullQty;
+        const newRemaining = maxTotal > 0 ? Math.min(maxTotal, computedRemaining) : computedRemaining;
+        const newDistributed = Math.max(0, currentDistributed - fullQty);
 
         updateBottleType(item.bottleTypeId, {
           remainingQuantity: newRemaining,

@@ -224,9 +224,13 @@ export const RecordReturnDialog: React.FC<RecordReturnDialogProps> = ({ open, on
         if ((item.consigneQuantity || 0) > 0) updateEmptyBottlesStockByBottleType(item.bottleTypeId, -(item.consigneQuantity || 0));
         if ((item.lostQuantity || 0) > 0) updateEmptyBottlesStockByBottleType(item.bottleTypeId, -(item.lostQuantity || 0));
         if ((item.foreignQuantity || 0) > 0) updateEmptyBottlesStockByBottleType(item.bottleTypeId, -(item.foreignQuantity || 0));
+        const currentRemaining = Number(bottleType.remainingQuantity || 0);
+        const currentDistributed = Number(bottleType.distributedQuantity || 0);
+        const returnedFull = Number(item.returnedFullQuantity || 0);
+        const fullQty = Number(item.fullQuantity || 0);
         updateBottleType(item.bottleTypeId, {
-          remainingQuantity: bottleType.remainingQuantity + (item.returnedFullQuantity || 0),
-          distributedQuantity: Math.max(0, bottleType.distributedQuantity - (item.fullQuantity || 0)),
+          remainingQuantity: currentRemaining + returnedFull,
+          distributedQuantity: Math.max(0, currentDistributed - fullQty),
         });
         const foreignEntries = foreignDetailsByItem[item.bottleTypeId] || [];
         foreignEntries.forEach(fb => addForeignBottle({ returnOrderId: newReturnOrderId, companyName: fb.companyName, bottleType: fb.bottleType, quantity: fb.quantity, date: new Date().toISOString() }));

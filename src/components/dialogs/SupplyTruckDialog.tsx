@@ -63,11 +63,14 @@ export const SupplyTruckDialog = ({ truck, open, onOpenChange }: SupplyTruckDial
     supplies.forEach(supply => {
       const bottle = bottleTypes.find(bt => bt.id === supply.bottleTypeId);
       if (bottle) {
+        const currentDistributed = Number(bottle.distributedQuantity || 0);
+        const currentRemaining = Number(bottle.remainingQuantity || 0);
+        const qty = Number(supply.quantity || 0);
         updateBottleType(bottle.id, {
-          distributedQuantity: (bottle.distributedQuantity || 0) + supply.quantity,
-          remainingQuantity: (bottle.remainingQuantity || 0) - supply.quantity
+          distributedQuantity: currentDistributed + qty,
+          remainingQuantity: currentRemaining - qty
         });
-        totalValue += bottle.unitPrice * supply.quantity;
+        totalValue += (Number(bottle.unitPrice) || 0) * qty;
       }
     });
 
@@ -253,4 +256,3 @@ export const SupplyTruckDialog = ({ truck, open, onOpenChange }: SupplyTruckDial
     </Dialog>
   );
 };
-

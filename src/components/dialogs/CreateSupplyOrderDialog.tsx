@@ -144,8 +144,11 @@ export const CreateSupplyOrderDialog: React.FC<CreateSupplyOrderDialogProps> = (
     items.forEach(item => {
       const bt = bottleTypes.find(bt => bt.id === item.bottleTypeId);
       if (!bt) return;
-      const nextRemaining = Math.max(0, (bt.remainingQuantity || 0) - item.fullQuantity);
-      const nextDistributed = (bt.distributedQuantity || 0) + item.fullQuantity;
+      const currentRemaining = Number(bt.remainingQuantity || 0);
+      const currentDistributed = Number(bt.distributedQuantity || 0);
+      const fullQty = Number(item.fullQuantity || 0);
+      const nextRemaining = Math.max(0, currentRemaining - fullQty);
+      const nextDistributed = currentDistributed + fullQty;
       updateBottleType(item.bottleTypeId, {
         remainingQuantity: nextRemaining,
         distributedQuantity: nextDistributed,
