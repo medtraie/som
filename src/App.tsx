@@ -31,6 +31,51 @@ import type { Session } from "@supabase/supabase-js";
 
 const queryClient = new QueryClient();
 
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error?: any }> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: any, info: any) {
+    console.error("Unhandled UI error:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+          <div className="max-w-lg w-full rounded-2xl bg-white shadow-xl border border-slate-100 p-8 space-y-4">
+            <div className="text-2xl font-bold text-slate-900">Une erreur s'est produite</div>
+            <div className="text-sm text-slate-600">L'interface a rencontré une erreur inattendue.</div>
+            {import.meta.env.DEV && this.state.error && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-md p-3 overflow-auto max-h-48">
+                {(this.state.error?.message || String(this.state.error))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                className="px-4 py-2 rounded-md bg-indigo-600 text-white font-semibold"
+                onClick={() => window.location.reload()}
+              >
+                Recharger
+              </button>
+              <button
+                className="px-4 py-2 rounded-md border border-slate-200 text-slate-700 font-semibold"
+                onClick={() => this.setState({ hasError: false, error: undefined })}
+              >
+                Essayer de continuer
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children as any;
+  }
+}
+
 const ProtectedRoute = ({ permission, element, fallback }: { permission: string; element: JSX.Element; fallback: string }) => {
   const { hasPermission } = useApp();
   if (!hasPermission(permission as any)) {
@@ -149,13 +194,15 @@ const App = () => {
           <UIToaster />
           <Sonner />
           <BrowserRouter>
-            {authReady ? (
-              <RoutesWithAuth session={session} />
-            ) : (
-              <div className="min-h-screen flex items-center justify-center text-muted-foreground">
-                Chargement...
-              </div>
-            )}
+            <ErrorBoundary>
+              {authReady ? (
+                <RoutesWithAuth session={session} />
+              ) : (
+                <div className="min-h-screen flex items-center justify-center text-muted-foreground">
+                  Chargement...
+                </div>
+              )}
+            </ErrorBoundary>
           </BrowserRouter>
         </AppProvider>
       </TooltipProvider>

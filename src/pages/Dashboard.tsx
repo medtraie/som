@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MetricCard } from '@/components/dashboard/MetricCard';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useApp } from '@/contexts/AppContext';
 import OilBarrelsWidget from '@/components/dashboard/OilBarrelsWidget';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { safeDate } from '@/lib/utils';
 import { useNavigate } from 'react-router-dom';
 import { 
   Package, 
@@ -18,6 +20,7 @@ import {
   Calendar,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowUpDown,
   Plus,
   History,
   Settings,
@@ -40,8 +43,9 @@ const Dashboard = () => {
     repairs = [],
     financialTransactions = [],
     revenues = [],
-    emptyBottlesStock = [], // Add emptyBottlesStock
-    cashOperations = [] // Add cashOperations
+    emptyBottlesStock = [],
+    cashOperations = [],
+    stockHistory = []
   } = useApp();
 
   // Debug logging
@@ -53,25 +57,14 @@ const Dashboard = () => {
   });
 
   const getStockMetrics = (bt: any) => {
-    // Calculate stock metrics dynamically to ensure accuracy
-    const warehouseFull = Number(bt?.remainingQuantity || 0);
+    const totalStored = Number(bt?.totalQuantity || 0);
     const distributed = Number(bt?.distributedQuantity || 0);
-    
-    // Find empty stock for this bottle type
     const emptyStockEntry = emptyBottlesStock.find(s => s.bottleTypeId === bt.id);
     const warehouseEmpty = Number(emptyStockEntry?.quantity || 0);
-    
-    // Total Assets = Full (Warehouse) + Empty (Warehouse) + Distributed (Circulation)
-    const totalAssets = warehouseFull + warehouseEmpty + distributed;
+    const warehouseFull = Math.max(totalStored - distributed, 0);
+    const totalAssets = totalStored > 0 ? totalStored : (warehouseFull + warehouseEmpty + distributed);
     const fullAssets = warehouseFull + distributed;
-    
-    return {
-      warehouseFull,
-      warehouseEmpty,
-      distributed,
-      fullAssets,
-      totalAssets
-    };
+    return { warehouseFull, warehouseEmpty, distributed, fullAssets, totalAssets };
   };
 
   const getRemainingQuantity = (bt: any) => {
@@ -84,13 +77,13 @@ const Dashboard = () => {
     return totalAssets;
   };
 
-  const isLowStock = (bt: any) => {
-    const { warehouseFull, totalAssets } = getStockMetrics(bt);
-    if (!totalAssets || totalAssets <= 0) return false;
-    // Alert if ready-to-sell stock is low (< 20% of total assets) AND absolute quantity is low (< 50 units)
-    // This prevents alerts when we have enough stock but just a lot distributed
-    const ratio = warehouseFull / totalAssets;
-    return ratio < 0.2 && warehouseFull < 50;
+  const getStockStatus = (remaining: number) => {
+    const r = Number(remaining || 0);
+    if (r < 100) return { label: 'Critique', color: 'bg-red-500', badge: 'destructive' as const };
+    if (r < 300) return { label: 'Faible', color: 'bg-orange-500', badge: 'secondary' as const };
+    if (r < 600) return { label: 'Moyen', color: 'bg-yellow-500', badge: 'outline' as const };
+    if (r < 1000) return { label: 'Bon', color: 'bg-green-500', badge: 'default' as const };
+    return { label: 'Normal', color: 'bg-green-500', badge: 'default' as const };
   };
 
   // Calculate metrics
@@ -112,7 +105,11 @@ const Dashboard = () => {
   
   // Use percentage < 20% for low stock alert
   // Alert based on Full Bottles availability vs Total Assets
-  const lowStockBottles = bottleTypes.filter(bt => isLowStock(bt));
+  const lowStockBottles = bottleTypes.filter(bt => {
+    const remaining = getRemainingQuantity(bt);
+    const status = getStockStatus(remaining);
+    return status.label === 'Critique' || status.label === 'Faible';
+  });
   
   const totalExpenses = useMemo(() => 
     expenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0) +
@@ -175,6 +172,185 @@ const Dashboard = () => {
     { label: 'Carburant', icon: Fuel, path: '/fuel', color: 'bg-orange-500' },
     { label: 'Réparation', icon: Wrench, path: '/repairs', color: 'bg-purple-500' },
   ];
+
+  const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'critique' | 'faible' | 'moyen' | 'bon' | 'normal'>('all');
+  const [stockSort, setStockSort] = useState<'remaining-asc' | 'remaining-desc'>('remaining-desc');
+
+  const getTruckLabel = (truckId?: string) => {
+    if (!truckId) return '';
+    const trk: any = trucks.find(t => String(t.id) === String(truckId));
+    return trk?.matricule || trk?.name || trk?.plateNumber || '';
+  };
+  const getDriverLabel = (driverId?: string, truckId?: string) => {
+    const id = driverId || trucks.find(t => String(t.id) === String(truckId))?.driverId;
+    if (!id) return '';
+    return drivers.find(d => String(d.id) === String(id))?.name || '';
+  };
+  const sumBottleQty = (list?: Array<{ quantity?: number }>) =>
+    (Array.isArray(list) ? list.reduce((s, i) => s + (Number(i.quantity) || 0), 0) : 0);
+  const normalizeDate = (obj: any) =>
+    safeDate(obj?.date || obj?.dateISO || obj?.createdAt);
+
+  const recentActivities = useMemo(() => {
+    const items: Array<{
+      id: string;
+      date: Date;
+      title: string;
+      subtitle?: string;
+      iconBg: string;
+      icon: React.ReactNode;
+      amount?: number;
+    }> = [];
+    // Transactions
+    transactions.forEach((t: any) => {
+      const truck = getTruckLabel(t.truckId);
+      const driver = getDriverLabel(t.driverId, t.truckId);
+      const totalQty = sumBottleQty(t.bottleTypes);
+      const date = normalizeDate(t);
+      let title = 'Opération';
+      let iconBg = 'bg-slate-100 text-slate-600';
+      let icon: React.ReactNode = <Activity className="w-4 h-4" />;
+      let amount = Number(t.totalValue || t.amount || t.totalVentes || 0);
+      if (t.type === 'supply') {
+        title = 'Alimentation Camion';
+        iconBg = 'bg-blue-100 text-blue-600';
+        icon = <ArrowUpRight className="w-4 h-4" />;
+      } else if (t.type === 'return') {
+        title = 'Retour Camion';
+        iconBg = 'bg-green-100 text-green-600';
+        icon = <ArrowDownRight className="w-4 h-4" />;
+      } else if (t.type === 'exchange') {
+        title = 'Échange Bouteilles';
+        iconBg = 'bg-orange-100 text-orange-600';
+        icon = <Package className="w-4 h-4" />;
+      } else if (t.type === 'payment') {
+        title = 'Paiement Chauffeur';
+        iconBg = 'bg-emerald-100 text-emerald-600';
+        icon = <DollarSign className="w-4 h-4" />;
+      } else if (t.type === 'debt') {
+        title = 'Dette Chauffeur';
+        iconBg = 'bg-red-100 text-red-600';
+        icon = <TrendingDown className="w-4 h-4" />;
+      } else if (t.type === 'factory') {
+        title = 'Usine';
+        iconBg = 'bg-slate-100 text-slate-600';
+        icon = <Droplets className="w-4 h-4" />;
+      }
+      const subtitle = [truck, driver, totalQty ? `${totalQty} unités` : null]
+        .filter(Boolean)
+        .join(' · ');
+      items.push({
+        id: String(t.id ?? `${title}-${date.getTime()}`),
+        date,
+        title,
+        subtitle,
+        iconBg,
+        icon,
+        amount: amount > 0 ? amount : undefined,
+      });
+    });
+    // Expenses
+    expenses.forEach((e: any) => {
+      const date = normalizeDate(e);
+      items.push({
+        id: String(e.id ?? `expense-${date.getTime()}`),
+        date,
+        title: `Dépense: ${e.type}`,
+        subtitle: String(e.paymentMethod || '').toUpperCase(),
+        iconBg: 'bg-red-100 text-red-600',
+        icon: <CreditCard className="w-4 h-4" />,
+        amount: Number(e.amount || 0) || undefined,
+      });
+    });
+    // Repairs
+    repairs.forEach((r: any) => {
+      const date = normalizeDate(r);
+      const truck = getTruckLabel(r.truckId);
+      items.push({
+        id: String(r.id ?? `repair-${date.getTime()}`),
+        date,
+        title: `Réparation: ${r.type}`,
+        subtitle: truck,
+        iconBg: 'bg-purple-100 text-purple-600',
+        icon: <Wrench className="w-4 h-4" />,
+        amount: Number(r.totalCost || 0) || undefined,
+      });
+    });
+    // Financial Transactions
+    financialTransactions.forEach((f: any) => {
+      const date = normalizeDate(f);
+      let title = 'Transaction';
+      let iconBg = 'bg-slate-100 text-slate-600';
+      let icon: React.ReactNode = <BarChart3 className="w-4 h-4" />;
+      if (f.type === 'encaissement' || f.type === 'versement') {
+        title = f.type === 'encaissement' ? 'Encaissement' : 'Versement';
+        iconBg = 'bg-green-100 text-green-600';
+        icon = <DollarSign className="w-4 h-4" />;
+      } else if (f.type === 'retrait') {
+        title = 'Retrait';
+        iconBg = 'bg-orange-100 text-orange-600';
+        icon = <TrendingDown className="w-4 h-4" />;
+      } else if (f.type === 'dépense' || f.type === 'réparation') {
+        title = f.type === 'dépense' ? 'Dépense' : 'Réparation';
+        iconBg = 'bg-red-100 text-red-600';
+        icon = <CreditCard className="w-4 h-4" />;
+      }
+      items.push({
+        id: String(f.id ?? `fin-${date.getTime()}`),
+        date,
+        title,
+        subtitle: f.description || '',
+        iconBg,
+        icon,
+        amount: Number(f.amount || 0) || undefined,
+      });
+    });
+    // Revenues
+    revenues.forEach((rev: any) => {
+      const date = normalizeDate(rev);
+      const ref = rev.relatedOrderId ? `Réf: ${String(rev.relatedOrderId).slice(-6)}` : '';
+      const driver = rev.driverName || '';
+      const total = Number(rev.totalAmount || rev.amount || rev.cashAmount || 0);
+      items.push({
+        id: String(rev.id ?? `rev-${date.getTime()}`),
+        date,
+        title: 'Recette',
+        subtitle: [driver, ref].filter(Boolean).join(' · '),
+        iconBg: 'bg-emerald-100 text-emerald-600',
+        icon: <TrendingUp className="w-4 h-4" />,
+        amount: total || undefined,
+      });
+    });
+    // Cash Operations
+    cashOperations.forEach((op: any) => {
+      const date = normalizeDate(op);
+      const isDeposit = op.type === 'versement';
+      items.push({
+        id: String(op.id ?? `cash-${date.getTime()}`),
+        date,
+        title: isDeposit ? 'Versement' : 'Retrait',
+        subtitle: String(op.accountAffected || '').toUpperCase(),
+        iconBg: isDeposit ? 'bg-green-100 text-green-600' : 'bg-orange-100 text-orange-600',
+        icon: isDeposit ? <DollarSign className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />,
+        amount: Number(op.amount || 0) || undefined,
+      });
+    });
+    // Stock History (Empty Bottles)
+    stockHistory.forEach((h: any) => {
+      const date = normalizeDate(h);
+      const isAdd = h.changeType === 'add' || h.changeType === 'return';
+      items.push({
+        id: String(h.id ?? `stock-${date.getTime()}`),
+        date,
+        title: 'Stock Vides',
+        subtitle: `${h.bottleTypeName || ''} · ${isAdd ? '+' : '-'}${h.quantity || 0}`,
+        iconBg: isAdd ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600',
+        icon: <History className="w-4 h-4" />,
+      });
+    });
+    items.sort((a, b) => b.date.getTime() - a.date.getTime());
+    return items.slice(0, 8);
+  }, [transactions, expenses, repairs, financialTransactions, revenues, cashOperations, stockHistory, trucks, drivers]);
 
   return (
     <div className="p-6 space-y-8 bg-slate-50/50 min-h-screen">
@@ -266,56 +442,79 @@ const Dashboard = () => {
 
         {/* Stock Status - Modernized */}
         <Card className="lg:col-span-2 border-none shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Package className="w-5 h-5 text-blue-600" />
-                État des Stocks
-              </CardTitle>
-              <CardDescription>Niveau actuel par type de bouteille</CardDescription>
+          <CardHeader className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Package className="w-5 h-5 text-blue-600" />
+                  État des Stocks
+                </CardTitle>
+                <CardDescription>Niveau actuel par type de bouteille</CardDescription>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/inventory')}>
+                Gérer le stock
+              </Button>
             </div>
-            <Button variant="ghost" size="sm" onClick={() => navigate('/inventory')}>
-              Gérer le stock
-            </Button>
+            <div className="flex items-center gap-3">
+              <ToggleGroup type="single" value={stockStatusFilter} onValueChange={(v) => setStockStatusFilter((v as any) || 'all')} className="gap-2">
+                <ToggleGroupItem value="all" className="px-2 py-1 text-xs">Tous</ToggleGroupItem>
+                <ToggleGroupItem value="critique" className="px-2 py-1 text-xs">Critique</ToggleGroupItem>
+                <ToggleGroupItem value="faible" className="px-2 py-1 text-xs">Faible</ToggleGroupItem>
+                <ToggleGroupItem value="moyen" className="px-2 py-1 text-xs">Moyen</ToggleGroupItem>
+                <ToggleGroupItem value="bon" className="px-2 py-1 text-xs">Bon</ToggleGroupItem>
+                <ToggleGroupItem value="normal" className="px-2 py-1 text-xs">Normal</ToggleGroupItem>
+              </ToggleGroup>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={() => setStockSort(stockSort === 'remaining-asc' ? 'remaining-desc' : 'remaining-asc')}
+                className="h-8 text-xs"
+              >
+                <ArrowUpDown className="w-3.5 h-3.5 mr-1" />
+                Trier par restant {stockSort === 'remaining-asc' ? '↑' : '↓'}
+              </Button>
+            </div>
           </CardHeader>
           <CardContent>
             <div className="space-y-6">
-              {bottleTypes.map((bottle) => {
-                const remaining = getRemainingQuantity(bottle);
-                const total = getTotalQuantity(bottle);
-                const percentage = Math.min(((remaining || 0) / (total || 1)) * 100, 100);
-                
-                const isCritical = isLowStock(bottle);
-                
-                let color = "bg-green-500";
-                if (isCritical) color = "bg-red-500";
-                else if (percentage < 20) color = "bg-orange-500";
-                else if (percentage < 50) color = "bg-yellow-500";
-
-                return (
-                  <div key={bottle.id} className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm">{bottle.name}</span>
-                        {isCritical && (
-                          <Badge variant="destructive" className="h-5 px-1.5 text-[10px] animate-pulse">
-                            ALERTE
-                          </Badge>
-                        )}
-                      </div>
-                      <span className="text-sm font-medium text-muted-foreground">
-                        {remaining} / {total}
-                      </span>
-                    </div>
-                    <div className="relative h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                      <div 
-                        className={`absolute top-0 left-0 h-full ${color} transition-all duration-500`}
-                        style={{ width: `${percentage}%` }}
-                      />
-                    </div>
-                  </div>
+              {useMemo(() => {
+                const items = bottleTypes.map((bottle) => {
+                  const remaining = getRemainingQuantity(bottle);
+                  const total = getTotalQuantity(bottle);
+                  const percentage = Math.min(((remaining || 0) / (total || 1)) * 100, 100);
+                  const status = getStockStatus(remaining);
+                  const { distributed } = getStockMetrics(bottle);
+                  return { bottle, remaining, total, percentage, status, distributed };
+                });
+                const filtered = stockStatusFilter === 'all' 
+                  ? items 
+                  : items.filter(i => i.status.label.toLowerCase() === stockStatusFilter);
+                const sorted = [...filtered].sort((a, b) => 
+                  stockSort === 'remaining-asc' ? a.remaining - b.remaining : b.remaining - a.remaining
                 );
-              })}
+                return sorted;
+              }, [bottleTypes, stockStatusFilter, stockSort, emptyBottlesStock]).map(({ bottle, remaining, total, percentage, status, distributed }) => (
+                <div key={bottle.id} className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-sm">{bottle.name}</span>
+                      <Badge variant={status.badge} className="h-5 px-1.5 text-[10px]">{status.label}</Badge>
+                    </div>
+                    <span className="text-sm font-medium text-muted-foreground">
+                      {remaining} / {total}
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-medium">
+                    Actuel: {total} | Restant: {remaining} | Distribué: {distributed}
+                  </div>
+                  <div className="relative h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                    <div 
+                      className={`absolute top-0 left-0 h-full ${status.color} transition-all duration-500`}
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -373,7 +572,7 @@ const Dashboard = () => {
                 <History className="w-5 h-5 text-purple-600" />
                 Activités Récentes
               </CardTitle>
-              <CardDescription>Les 6 dernières opérations effectuées</CardDescription>
+              <CardDescription>Les 8 dernières activités effectuées</CardDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate('/reports')}>
               Voir tout
@@ -381,73 +580,36 @@ const Dashboard = () => {
           </CardHeader>
           <CardContent>
             <div className="space-y-1">
-              {[...transactions, ...expenses, ...repairs]
-                .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-                .slice(0, 6)
-                .map((activity, index) => {
-                  let icon = <Activity className="w-4 h-4" />;
-                  let iconBg = "bg-slate-100 text-slate-600";
-                  let title = "Opération";
-                  let amount = 0;
-
-                  if ('type' in activity) {
-                    if (activity.type === 'supply') {
-                      icon = <ArrowUpRight className="w-4 h-4" />;
-                      iconBg = "bg-blue-100 text-blue-600";
-                      title = "Alimentation Camion";
-                      amount = activity.totalValue || 0;
-                    } else if (activity.type === 'return') {
-                      icon = <ArrowDownRight className="w-4 h-4" />;
-                      iconBg = "bg-green-100 text-green-600";
-                      title = "Retour Camion";
-                      amount = activity.totalVentes || 0;
-                    } else if (activity.type === 'exchange') {
-                      icon = <Package className="w-4 h-4" />;
-                      iconBg = "bg-orange-100 text-orange-600";
-                      title = "Échange Bouteilles";
-                    }
-                  } else if ('amount' in activity) {
-                    icon = <CreditCard className="w-4 h-4" />;
-                    iconBg = "bg-red-100 text-red-600";
-                    title = `Dépense: ${activity.type}`;
-                    amount = activity.amount;
-                  } else if ('totalCost' in activity) {
-                    icon = <Wrench className="w-4 h-4" />;
-                    iconBg = "bg-purple-100 text-purple-600";
-                    title = `Réparation: ${activity.type}`;
-                    amount = activity.totalCost;
-                  }
-
-                  return (
-                    <div 
-                      key={activity.id || index} 
-                      className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors group cursor-pointer"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className={`p-2.5 rounded-lg ${iconBg} group-hover:scale-110 transition-transform`}>
-                          {icon}
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold leading-none mb-1">{title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {new Date(activity.date).toLocaleDateString('fr-FR', {
-                              day: '2-digit',
-                              month: 'short',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold">
-                          {amount > 0 ? `${amount.toLocaleString()} DH` : '--'}
-                        </p>
-                      </div>
+              {recentActivities.map((activity) => (
+                <div 
+                  key={activity.id} 
+                  className="flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors group cursor-pointer"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className={`p-2.5 rounded-lg ${activity.iconBg} group-hover:scale-110 transition-transform`}>
+                      {activity.icon}
                     </div>
-                  );
-                })}
-              {transactions.length === 0 && expenses.length === 0 && repairs.length === 0 && (
+                    <div>
+                      <p className="text-sm font-bold leading-none mb-1">{activity.title}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {activity.subtitle ? `${activity.subtitle} · ` : ''}
+                        {activity.date.toLocaleDateString('fr-FR', {
+                          day: '2-digit',
+                          month: 'short',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-sm font-bold ${activity.amount ? 'text-slate-900' : 'text-slate-400'}`}>
+                      {activity.amount ? `${activity.amount.toLocaleString()} DH` : '--'}
+                    </p>
+                  </div>
+                </div>
+              ))}
+              {recentActivities.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
                   <History className="w-12 h-12 mb-2 opacity-20" />
                   <p>Aucune activité récente</p>

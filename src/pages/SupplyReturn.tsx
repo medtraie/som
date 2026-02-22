@@ -9,7 +9,7 @@ import { useApp } from '@/contexts/AppContext';
 
 import { Package, FileText, Plus, Printer, Download, Search, Calendar, RotateCcw, Trash2, Edit, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, FileSpreadsheet, Loader2, Settings, DollarSign, Calculator, ArrowUpRight, ArrowDownLeft, Truck } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { SupplyOrderItem, SupplyOrder } from '@/types';
+import { SupplyOrderItem, SupplyOrder, BottleType } from '@/types';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
 import jsPDF from 'jspdf';
@@ -211,6 +211,12 @@ const SupplyReturn = () => {
     }
   };
   
+  const getWarehouseFull = (bt: BottleType) => {
+    const totalStored = Number(bt?.totalQuantity || 0);
+    const distributed = Number(bt?.distributedQuantity || 0);
+    return Math.max(totalStored - distributed, 0);
+  };
+  
   const handleQuantityChange = (bottleTypeId: string, field: 'empty' | 'full', value: string) => {
     const raw = parseInt(value) || 0;
     const bottleType = bottleTypes.find(bt => bt.id === bottleTypeId);
@@ -218,7 +224,7 @@ const SupplyReturn = () => {
 
     const safeQuantity =
       field === 'full'
-        ? Math.max(0, Math.min(raw, bottleType.remainingQuantity))
+        ? Math.max(0, Math.min(raw, getWarehouseFull(bottleType)))
         : Math.max(0, raw);
 
     setItems(prev => {
@@ -299,8 +305,8 @@ const SupplyReturn = () => {
     items.forEach(item => {
       const bottleType = bottleTypes.find(bt => bt.id === item.bottleTypeId);
       if (bottleType) {
-        const currentRemaining = Number(bottleType.remainingQuantity || 0);
         const currentDistributed = Number(bottleType.distributedQuantity || 0);
+        const currentRemaining = Number(bottleType.totalQuantity || 0) - currentDistributed;
         const fullQty = Number(item.fullQuantity || 0);
         const newRemainingQuantity = currentRemaining - fullQty;
         const newDistributedQuantity = currentDistributed + fullQty;
@@ -1339,7 +1345,7 @@ const SupplyReturn = () => {
                               <Input
                                 type="number"
                                 min={0}
-                                max={bt.remainingQuantity}
+                                max={getWarehouseFull(bt)}
                                 value={fullQty}
                                 onChange={(e) => handleQuantityChange(bt.id, 'full', e.target.value)}
                                 className={cn(
@@ -1348,16 +1354,16 @@ const SupplyReturn = () => {
                                 )}
                               />
                               <div className="text-[10px] text-slate-400 font-medium">
-                                Limite: {bt.remainingQuantity}
+                                Limite: {getWarehouseFull(bt)}
                               </div>
                             </div>
                           </TableCell>
                           <TableCell className="text-center">
                             <Badge variant="outline" className={cn(
                               "font-mono",
-                              bt.remainingQuantity < 10 ? "text-red-600 bg-red-50 border-red-100" : "text-slate-600"
+                              getWarehouseFull(bt) < 10 ? "text-red-600 bg-red-50 border-red-100" : "text-slate-600"
                             )}>
-                              {bt.remainingQuantity}
+                              {getWarehouseFull(bt)}
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right font-medium text-slate-600">

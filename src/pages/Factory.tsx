@@ -117,6 +117,7 @@ const Factory = () => {
     drivers, 
     updateBottleType, 
     addTransaction,
+    addStockHistory,
     emptyBottlesStock,
     defectiveBottles,
     updateEmptyBottlesStockByBottleType,
@@ -128,6 +129,7 @@ const Factory = () => {
     addCashOperation
   } = useApp();
   const safeSuppliers = suppliers || [];
+  const [localPurchasePrices, setLocalPurchasePrices] = useState<Record<string, number>>({});
 
   const handleDownloadInvoicePDF = (invoice: Invoice) => {
     try {
@@ -1153,24 +1155,30 @@ const Factory = () => {
       const currentBT = bottleTypes.find(bt => bt.id === bottle.bottleTypeId);
       if (currentBT) {
         const currentRemaining = Number(currentBT.remainingQuantity || 0);
+        const currentTotal = Number(currentBT.totalQuantity || 0);
         const qty = Number(bottle.quantity || 0);
         updateBottleType(bottle.bottleTypeId, {
+          totalQuantity: currentTotal + qty,
           remainingQuantity: currentRemaining + qty
         });
-        
-        // Also update empty stock as requested by user
-        updateEmptyBottlesStockByBottleType(
-          bottle.bottleTypeId, 
-          bottle.quantity,
-          'factory',
-          `Retour usine - ${operation.blReference || 'BL Inconnu'} - ${safeSuppliers.find(s => s.id === operation.supplierId)?.name || 'Fournisseur inconnu'}`,
-          {
-            truckId: operation.truckId,
-            supplierId: operation.supplierId,
-            blReference: operation.blReference,
-            operationId: String(operation.id)
-          }
-        );
+        const noteParts = [
+          operation.blReference ? `BL: ${operation.blReference}` : '',
+          operation.supplierId ? `Fournisseur: ${safeSuppliers.find(s => s.id === operation.supplierId)?.name || operation.supplierId}` : '',
+          operation.truckId ? `Camion: ${trucks.find(t => t.id === operation.truckId)?.name || operation.truckId}` : '',
+          `Opération: ${operation.id}`
+        ].filter(Boolean).join(' | ');
+        addStockHistory({
+          date: returnForm.date ? returnForm.date.toISOString() : new Date().toISOString(),
+          bottleTypeId: bottle.bottleTypeId,
+          bottleTypeName: currentBT.name,
+          stockType: 'all',
+          changeType: 'factory',
+          quantity: qty,
+          previousQuantity: currentRemaining,
+          newQuantity: currentRemaining + qty,
+          note: `Réception Usine | ${noteParts}`
+        });
+
       }
     });
 
@@ -2217,6 +2225,7 @@ const Factory = () => {
                 <div className="grid gap-4 md:grid-cols-2">
                   {bottleTypes.map((bt, index) => {
                     const receivedEntry = returnForm.receivedBottles[index] || { bottleTypeId: bt.id, quantity: 0 };
+                    const effectivePrice = localPurchasePrices[bt.id] ?? (bt.purchasePrice ?? 0);
                     return (
                     <div key={bt.id} className="bg-slate-50 p-6 rounded-2xl border border-slate-100 flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -2246,23 +2255,18 @@ const Factory = () => {
                         </div>
                         <div className="text-left space-y-2">
                           <Label className="text-[10px] font-black text-slate-400 uppercase">Prix d'achat</Label>
-                          {bt.capacity === '34KG' ? (
-                            <Input
-                              type="number"
-                              value={String(bt.purchasePrice ?? 0)}
-                              onChange={(e) => {
-                                const val = parseFloat(e.target.value) || 0;
-                                updateBottleType(bt.id, { purchasePrice: val });
-                              }}
-                              className="h-11 border-none bg-white rounded-xl text-left font-bold focus:ring-2 focus:ring-emerald-500/20"
-                            />
-                          ) : (
-                            <div className="h-11 bg-white rounded-xl flex items-center px-3 font-bold text-slate-700">
-                              {Number(bt.purchasePrice ?? 0).toFixed(3)}
-                            </div>
-                          )}
+                          <Input
+                            type="number"
+                            value={String(effectivePrice)}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setLocalPurchasePrices(prev => ({ ...prev, [bt.id]: val }));
+                              updateBottleType(bt.id, { purchasePrice: val });
+                            }}
+                            className="h-11 border-none bg-white rounded-xl text-left font-bold focus:ring-2 focus:ring-emerald-500/20"
+                          />
                           <div className="text-xs text-slate-500">
-                            Montant: {Number((bt.purchasePrice ?? 0) * (receivedEntry.quantity || 0)).toFixed(3)}
+                            Montant: {Number(effectivePrice * (receivedEntry.quantity || 0)).toFixed(3)}
                           </div>
                         </div>
                       </div>

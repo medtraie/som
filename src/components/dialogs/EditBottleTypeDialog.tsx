@@ -60,9 +60,12 @@ export const EditBottleTypeDialog = ({ bottle, open, onOpenChange }: EditBottleT
     }
 
     const newTotalQuantity = parseInt(formData.totalQuantity) || 0;
-    const currentTotalQuantity = bottle.totalQuantity ?? (bottle as any).totalquantity ?? 0;
     const currentRemainingQuantity = bottle.remainingQuantity ?? (bottle as any).remainingquantity ?? 0;
-    const quantityDifference = newTotalQuantity - currentTotalQuantity;
+    const currentDistributedQuantity = bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0;
+    const currentTotalQuantity =
+      (bottle.totalQuantity ?? (bottle as any).totalquantity) ??
+      (currentRemainingQuantity + currentDistributedQuantity);
+    const quantityDifference = newTotalQuantity - Number(currentTotalQuantity || 0);
     
     const result = await updateBottleType(bottle.id, {
       name: formData.name,
@@ -116,7 +119,7 @@ export const EditBottleTypeDialog = ({ bottle, open, onOpenChange }: EditBottleT
               required
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Actuel: {bottle.totalQuantity ?? ((bottle.remainingQuantity || 0) + (bottle.distributedQuantity || 0))} | Restant: {bottle.remainingQuantity} | Distribué: {bottle.distributedQuantity}
+              Actuel: {Number(bottle.totalQuantity ?? (bottle as any).totalquantity ?? ((bottle.remainingQuantity ?? (bottle as any).remainingquantity ?? 0) + (bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0)))} | Restant: {Math.max(Number(bottle.totalQuantity ?? (bottle as any).totalquantity ?? ((bottle.remainingQuantity ?? (bottle as any).remainingquantity ?? 0) + (bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0))) - Number(bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0), 0)} | Distribué: {Number(bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0)}
             </p>
           </div>
           <div>

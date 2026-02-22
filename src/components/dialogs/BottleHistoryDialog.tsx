@@ -13,7 +13,7 @@ interface BottleHistoryDialogProps {
 }
 
 export const BottleHistoryDialog = ({ bottle, open, onOpenChange }: BottleHistoryDialogProps) => {
-  const { transactions, returnOrders, foreignBottles } = useApp();
+  const { transactions, returnOrders, foreignBottles, supplyOrders, emptyBottlesStock = [], defectiveBottles = [] } = useApp();
 
   const bottleMovements = React.useMemo(() => {
     const entries: Array<{ id: string; date: string | number; type: string; label: string; quantity: number; }> = [];
@@ -73,6 +73,89 @@ export const BottleHistoryDialog = ({ bottle, open, onOpenChange }: BottleHistor
     return entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
   }, [transactions, returnOrders, foreignBottles, bottle.id, bottle.name]);
 
+  const getPendingCirculation = React.useCallback((bottleTypeId: string) => {
+    if (!supplyOrders || !Array.isArray(supplyOrders)) return 0;
+    const pendingOrders = supplyOrders.filter((o: any) => {
+      if (!o || !o.id) return false;
+      const hasReturn = (returnOrders || []).some((ro: any) => String(ro?.supplyOrderId) === String(o.id));
+      return !hasReturn;
+    });
+    return pendingOrders.reduce((sum: number, o: any) => {
+      let items: any[] = [];
+      try {
+        if (Array.isArray(o?.items)) {
+          items = o.items;
+        } else if (typeof o?.items === 'string') {
+          const trimmed = o.items.trim();
+          if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            const parsed = JSON.parse(trimmed);
+            items = Array.isArray(parsed) ? parsed : [parsed];
+          }
+        } else if (typeof o?.items === 'object' && o?.items !== null) {
+          items = [o.items];
+        }
+      } catch {
+        items = [];
+      }
+      const qty = items
+        .filter((it: any) => {
+          const itId = String(it?.bottleTypeId ?? it?.bottle_type_id ?? it?.id ?? '');
+          return itId === String(bottleTypeId);
+        })
+        .reduce((s: number, it: any) => {
+          const val = Number(it?.fullQuantity ?? it?.full_quantity ?? it?.quantity ?? it?.qty ?? 0);
+          return s + val;
+        }, 0);
+      return sum + qty;
+    }, 0);
+  }, [supplyOrders, returnOrders]);
+
+  const totalStored = Number(bottle.totalQuantity ?? (bottle as any).totalquantity ?? 0);
+  const distributedDb = Number(bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0);
+  const circulation = getPendingCirculation(String(bottle.id));
+  const distributedEffective = Math.max(distributedDb, circulation);
+  const stockPlein = Math.max(totalStored - distributedEffective, 0);
+  const emptyQty = React.useMemo(() => {
+    return Number(emptyBottlesStock.find(s => String(s.bottleTypeId) === String(bottle.id))?.quantity || 0);
+  }, [emptyBottlesStock, bottle.id]);
+  const defectiveQty = React.useMemo(() => {
+    return defectiveBottles
+      .filter(d => String(d.bottleTypeId) === String(bottle.id))
+      .reduce((sum, d) => sum + Number(d.quantity || 0), 0);
+  }, [defectiveBottles, bottle.id]);
+  const distributedCumulative = React.useMemo(() => {
+    const safeOrders = Array.isArray(supplyOrders) ? supplyOrders : [];
+    return safeOrders.reduce((sum: number, o: any) => {
+      let items: any[] = [];
+      try {
+        if (Array.isArray(o?.items)) {
+          items = o.items;
+        } else if (typeof o?.items === 'string') {
+          const trimmed = o.items.trim();
+          if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            const parsed = JSON.parse(trimmed);
+            items = Array.isArray(parsed) ? parsed : [parsed];
+          }
+        } else if (typeof o?.items === 'object' && o?.items !== null) {
+          items = [o.items];
+        }
+      } catch {
+        items = [];
+      }
+      const qty = items
+        .filter((it: any) => {
+          const itId = String(it?.bottleTypeId ?? it?.bottle_type_id ?? it?.id ?? '');
+          const itName = String(it?.bottleTypeName ?? it?.name ?? it?.bottle_type_name ?? '');
+          return itId === String(bottle.id) || itName === String(bottle.name);
+        })
+        .reduce((s: number, it: any) => {
+          const val = Number(it?.fullQuantity ?? it?.full_quantity ?? it?.quantity ?? it?.qty ?? 0);
+          return s + val;
+        }, 0);
+      return sum + qty;
+    }, 0);
+  }, [supplyOrders, bottle.id, bottle.name]);
+
   const getTransactionIcon = (type: string) => {
     switch (type) {
       case 'supply': return <TrendingDown className="w-4 h-4 text-destructive" />;
@@ -118,20 +201,47 @@ export const BottleHistoryDialog = ({ bottle, open, onOpenChange }: BottleHistor
         
         <div className="space-y-4">
           {/* Summary */}
-          <div className="grid grid-cols-3 gap-3 p-4 bg-muted/50 rounded-lg">
+          <div className="p-4 bg-muted/50 rounded-lg space-y-3">
+            <div className="grid grid-cols-3 gap-3">
             <div className="text-center">
-              <div className="text-2xl font-bold text-primary">{bottle.totalQuantity}</div>
+              <div className="text-2xl font-bold text-primary">{totalStored}</div>
               <div className="text-xs text-muted-foreground">Total</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-success">{bottle.distributedQuantity}</div>
+                <div className="text-2xl font-bold text-success">{distributedEffective}</div>
               <div className="text-xs text-muted-foreground">Distribué</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold">{bottle.remainingQuantity}</div>
+              <div className="text-2xl font-bold">{stockPlein}</div>
               <div className="text-xs text-muted-foreground">Restant</div>
             </div>
           </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-indigo-600">{circulation}</div>
+                <div className="text-xs text-muted-foreground">Circulation</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-slate-900">{distributedDb}</div>
+                <div className="text-xs text-muted-foreground">Distribué (DB)</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-blue-600">{distributedCumulative}</div>
+                <div className="text-xs text-muted-foreground">Distribué (Historique)</div>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="text-center">
+                <div className="text-2xl font-bold text-purple-600">{emptyQty}</div>
+                <div className="text-xs text-muted-foreground">Vides</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl font-bold text-rose-600">{defectiveQty}</div>
+                <div className="text-xs text-muted-foreground">Défectueuses</div>
+              </div>
+            </div>
+
+            </div>
 
           {/* Transaction List */}
           <div>

@@ -1273,38 +1273,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     }
 
-    // Also update BottleType totalQuantity if this is an asset increase (Add Stock)
-    // Only if changeType is 'add' (or implied add)
     const type = customChangeType || (delta > 0 ? 'add' : 'remove');
-    if (type === 'add' && delta > 0) {
-       const bt = bottleTypes.find(b => b.id === bottleTypeId);
-       if (bt) {
-         const newTotal = (bt.totalQuantity || 0) + delta;
-         // We also update remainingQuantity in bottle_types table to keep it in sync with empty_bottles_stock
-         // Although Dashboard calculates it, having it correct in DB is good.
-         // However, bottle_types.remainingQuantity usually tracks "Warehouse Stock".
-         // empty_bottles_stock IS the warehouse stock for empties.
-         // So we should update bottle_types.remainingQuantity too.
-         const newRemaining = (bt.remainingQuantity || 0) + delta;
-         
-         await updateBottleType(bottleTypeId, { 
-           totalQuantity: newTotal,
-           remainingQuantity: newRemaining
-         });
-       }
-    } else if (type === 'remove' && delta < 0) {
-       // If we remove stock (e.g. lost, destroyed), we should reduce totalQuantity?
-       // Or if we just move it to truck?
-       // If moving to truck, it's 'distribution', not 'remove' from assets.
-       // Usually 'remove' here means "Exit Warehouse".
-       // If it exits to Truck, totalQuantity stays same.
-       // If it exits to Destroy/Lost, totalQuantity decreases.
-       // But this function doesn't know the destination.
-       // However, 'updateEmptyBottlesStockByBottleType' is generic.
-       // If called by 'Supply' (Load Truck), it should NOT reduce totalQuantity.
-       // Supply usually calls updateEmptyBottlesStockByBottleType?
-       // Let's check Supply logic.
-    }
 
     const noteParts: string[] = [];
     if (customMeta?.truckId) {
@@ -1653,11 +1622,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const updateBottleType = async (id: string, patch: Partial<BottleType>) => {
     const updated = await supabaseService.update<BottleType>("bottle_types", id, patch);
     if (updated) {
-      const merged = { id, ...patch, ...updated };
+      const merged = { id, ...updated, ...patch };
       setBottleTypes(prev => prev.map(b => (b.id === id ? { ...b, ...merged } : b)));
       return merged;
     }
-    return null;
+    setBottleTypes(prev => prev.map(b => (b.id === id ? { ...b, ...patch } : b)));
+    return { id, ...(patch as any) } as BottleType;
   };
   const deleteBottleType = async (id: string) => {
     const success = await supabaseService.delete("bottle_types", id);

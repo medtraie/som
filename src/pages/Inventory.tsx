@@ -92,14 +92,59 @@ const Inventory = () => {
   }, [stockHistory, historyBottle]);
 
   const getStockStatus = (remaining: number, total: number) => {
-    if (!total || isNaN(remaining) || isNaN(total)) return { status: 'Normal', variant: 'default' as const, icon: TrendingUp };
-    const percentage = (remaining / total) * 100;
-    if (percentage < 20) return { status: 'Critique', variant: 'destructive' as const, icon: TrendingDown };
-    if (percentage < 50) return { status: 'Faible', variant: 'secondary' as const, icon: TrendingDown };
+    const r = Number(remaining || 0);
+    if (isNaN(r)) return { status: 'Normal', variant: 'default' as const, icon: TrendingUp };
+    if (r < 100) return { status: 'Critique', variant: 'destructive' as const, icon: TrendingDown };
+    if (r < 300) return { status: 'Faible', variant: 'secondary' as const, icon: TrendingDown };
+    if (r < 600) return { status: 'Moyen', variant: 'outline' as const, icon: TrendingDown };
+    if (r < 1000) return { status: 'Bon', variant: 'default' as const, icon: TrendingUp };
     return { status: 'Normal', variant: 'default' as const, icon: TrendingUp };
   };
 
   const availableBottleTypes = bottleTypes;
+
+  const getPendingCirculation = (bottleTypeId: string) => {
+    if (!supplyOrders || !Array.isArray(supplyOrders)) return 0;
+
+    const pendingOrders = supplyOrders.filter((o: any) => {
+      if (!o || !o.id) return false;
+      // Check if there is a return order linked to this supply order
+      const hasReturn = (returnOrders || []).some((ro: any) => String(ro?.supplyOrderId) === String(o.id));
+      return !hasReturn;
+    });
+
+    return pendingOrders.reduce((sum: number, o: any) => {
+      let items: any[] = [];
+      try {
+        if (Array.isArray(o?.items)) {
+          items = o.items;
+        } else if (typeof o?.items === 'string') {
+          const trimmed = o.items.trim();
+          if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            const parsed = JSON.parse(trimmed);
+            items = Array.isArray(parsed) ? parsed : [parsed];
+          }
+        } else if (typeof o?.items === 'object' && o?.items !== null) {
+          items = [o.items];
+        }
+      } catch {
+        items = [];
+      }
+      
+      const qty = items
+        .filter((it: any) => {
+          // Check for camelCase, snake_case, or simple id
+          const itId = String(it?.bottleTypeId ?? it?.bottle_type_id ?? it?.id ?? '');
+          return itId === String(bottleTypeId);
+        })
+        .reduce((s: number, it: any) => {
+          // Check for various quantity field names
+          const val = Number(it?.fullQuantity ?? it?.full_quantity ?? it?.quantity ?? it?.qty ?? 0);
+          return s + val;
+        }, 0);
+      return sum + qty;
+    }, 0);
+  };
 
   const getEmptyQuantity = (id: string) =>
     emptyBottlesStock.find(s => s.bottleTypeId === id)?.quantity || 0;
@@ -182,6 +227,7 @@ const Inventory = () => {
           driverName: getDriverNameForReturn(ro),
           bottleTypeName: item.bottleTypeName,
           emptyDelta,
+          // Correction: Returned Full bottles add to Pleins stock, they do NOT add to Vides
           fullDelta: Number(item.returnedFullQuantity || 0),
           defectiveDelta: Number(item.defectiveQuantity || 0),
           foreignDelta: Number(item.foreignQuantity || 0),
@@ -320,11 +366,29 @@ const Inventory = () => {
       {/* Inventory Grid */}
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {availableBottleTypes.map((bottle) => {
-          const computedTotal = (bottle.totalQuantity ?? ((bottle.remainingQuantity || 0) + (bottle.distributedQuantity || 0)));
-          const stockInfo = getStockStatus(bottle.remainingQuantity || 0, computedTotal || 0);
-          const totalQty = computedTotal || 0;
-          const distQty = bottle.distributedQuantity || 0;
-          const distributionRate = totalQty > 0 ? (distQty / totalQty) * 100 : 0;
+          // Calculate stock metrics accurately
+          const totalAssetsStored = Number(bottle.totalQuantity ?? (bottle as any).totalquantity ?? 0);
+          const distributedField = Number(bottle.distributedQuantity ?? (bottle as any).distributedquantity ?? 0);
+          const pendingCirculation = getPendingCirculation(bottle.id);
+          // If distributedField is 0, try pendingCirculation. We prefer the larger value to be safe, 
+          // or assume pendingCirculation is the source of truth if distributedField is unreliable.
+          const distributed = Math.max(distributedField, pendingCirculation);
+          
+          const emptyStockEntry = emptyBottlesStock.find(s => s.bottleTypeId === bottle.id);
+          const warehouseEmpty = Number(emptyStockEntry?.quantity || 0);
+          const totalStored = Number(bottle.totalQuantity ?? (bottle as any).totalquantity ?? 0);
+          
+          // Re-calculate based on core truth: Total = Plein + Distributed
+          // If totalStored is reliable (from DB), then Plein = Total - Distributed
+          const stockPlein = Math.max(totalStored - distributed, 0);
+          
+          // However, if totalStored is just warehouse stock (some versions), then Total = Plein + Distributed
+          // Let's assume totalStored is Total Assets for now, but fallback if needed.
+          const computedTotal = totalStored > 0 ? totalStored : (stockPlein + distributed);
+          
+          const stockInfo = getStockStatus(stockPlein, computedTotal || 0);
+          const distQty = distributed;
+          const distributionRate = computedTotal > 0 ? (distQty / computedTotal) * 100 : 0;
           
           return (
             <Card key={bottle.id} className="hover:shadow-lg transition-shadow border-slate-200">
@@ -349,27 +413,31 @@ const Inventory = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm font-semibold">
                     <span className="text-slate-600">Stock plein restant</span>
-                    <span className="text-slate-900">{bottle.remainingQuantity} unités</span>
+                    <span className="text-slate-900">{stockPlein} unités</span>
                   </div>
                   <div className="w-full bg-slate-100 rounded-full h-2.5 overflow-hidden">
                     <div 
                       className="bg-indigo-600 h-full rounded-full transition-all duration-500" 
                       style={{ 
-                        width: `${totalQty > 0 ? Math.min(((bottle.remainingQuantity || 0) / totalQty) * 100, 100) : 0}%` 
+                        width: `${computedTotal > 0 ? Math.min(((stockPlein) / computedTotal) * 100, 100) : 0}%` 
                       }}
                     />
                   </div>
                 </div>
 
                 {/* Stock Details */}
-                <div className="grid grid-cols-2 gap-4 p-3 bg-slate-50 rounded-xl">
-                  <div className="space-y-1">
-                    <p className="text-xs text-slate-500 uppercase tracking-wider font-bold">Capacité Totale</p>
-                    <p className="text-lg font-bold text-slate-900">{computedTotal}</p>
+                <div className="grid grid-cols-3 gap-2 p-3 bg-slate-50 rounded-xl">
+                  <div className="space-y-1 text-center">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Plein</p>
+                    <p className="text-base font-bold text-slate-900">{stockPlein}</p>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-xs text-slate-500 uppercase tracking-wider font-bold">En Circulation</p>
-                    <p className="text-lg font-bold text-indigo-600">{bottle.distributedQuantity}</p>
+                  <div className="space-y-1 text-center border-l border-slate-200 pl-2">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Vides</p>
+                    <p className="text-base font-bold text-purple-600">{warehouseEmpty}</p>
+                  </div>
+                  <div className="space-y-1 text-center border-l border-slate-200 pl-2">
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Circulation</p>
+                    <p className="text-base font-bold text-indigo-600">{distQty}</p>
                   </div>
                 </div>
 
@@ -443,7 +511,7 @@ const Inventory = () => {
                 <Archive className="w-6 h-6 text-indigo-600" />
               </div>
               <div className="text-3xl font-black text-slate-900">
-                {availableBottleTypes.reduce((sum, bt) => sum + bt.totalQuantity, 0)}
+                {availableBottleTypes.reduce((sum, bt) => sum + Number((bt as any).totalQuantity ?? (bt as any).totalquantity ?? 0), 0)}
               </div>
               <div className="text-sm font-bold text-slate-500 uppercase tracking-wide">Total général</div>
             </div>
@@ -452,7 +520,29 @@ const Inventory = () => {
                 <Truck className="w-6 h-6 text-blue-600" />
               </div>
               <div className="text-3xl font-black text-blue-600">
-                {availableBottleTypes.reduce((sum, bt) => sum + bt.distributedQuantity, 0)}
+                {Array.isArray(supplyOrders) ? supplyOrders.reduce((total, o: any) => {
+                  let items: any[] = [];
+                  try {
+                    if (Array.isArray(o?.items)) {
+                      items = o.items;
+                    } else if (typeof o?.items === 'string') {
+                      const s = o.items.trim();
+                      if (s.startsWith('[') || s.startsWith('{')) {
+                        const parsed = JSON.parse(s);
+                        items = Array.isArray(parsed) ? parsed : [parsed];
+                      }
+                    } else if (typeof o?.items === 'object' && o?.items !== null) {
+                      items = [o.items];
+                    }
+                  } catch {
+                    items = [];
+                  }
+                  const qty = items.reduce((s: number, it: any) => {
+                    const val = Number(it?.fullQuantity ?? it?.full_quantity ?? it?.quantity ?? it?.qty ?? 0);
+                    return s + val;
+                  }, 0);
+                  return total + qty;
+                }, 0) : 0}
               </div>
               <div className="text-sm font-bold text-slate-500 uppercase tracking-wide">Distribuées</div>
             </div>
@@ -461,7 +551,14 @@ const Inventory = () => {
                 <PackageCheck className="w-6 h-6 text-emerald-600" />
               </div>
               <div className="text-3xl font-black text-emerald-600">
-                {availableBottleTypes.reduce((sum, bt) => sum + bt.remainingQuantity, 0)}
+                {availableBottleTypes.reduce((sum, bt) => {
+                  const totalStored = Number((bt as any).totalQuantity ?? (bt as any).totalquantity ?? 0);
+                  const distributedField = Number((bt as any).distributedQuantity ?? (bt as any).distributedquantity ?? bt.distributedQuantity ?? 0);
+                  const pending = getPendingCirculation(bt.id);
+                  const distributed = Math.max(distributedField, pending);
+                  const stockPlein = Math.max(totalStored - distributed, 0);
+                  return sum + stockPlein;
+                }, 0)}
               </div>
               <div className="text-sm font-bold text-slate-500 uppercase tracking-wide">Restantes</div>
             </div>
@@ -476,7 +573,11 @@ const Inventory = () => {
               </Button>
               {showTotalValue ? (
                 <div className="text-3xl font-black text-indigo-600">
-                  {availableBottleTypes.reduce((sum, bt) => sum + (bt.remainingQuantity * bt.unitPrice), 0).toLocaleString()} DH
+                  {availableBottleTypes.reduce((sum, bt) => {
+                    const rem = Number((bt as any).remainingQuantity ?? 0);
+                    const price = Number((bt as any).unitPrice ?? 0);
+                    return sum + (rem * price);
+                  }, 0).toLocaleString()} DH
                 </div>
               ) : (
                 <div className="text-3xl font-black text-slate-300">••••••</div>
