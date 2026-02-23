@@ -630,12 +630,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       }
     };
   
-    const deleteDriver = async (id: string) => {
-      const success = await supabaseService.delete("drivers", String(id));
-      if (success) {
-        setDrivers(prev => prev.filter(d => String(d.id) !== String(id)));
-      }
-    };
+    
   
     // Ensure all drivers have unique string ids (fixes React key warnings)
     React.useEffect(() => {
