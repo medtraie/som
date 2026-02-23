@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -18,7 +19,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const Drivers = () => {
-  const { drivers, bottleTypes, transactions, cashOperations } = useApp();
+  const { drivers, bottleTypes, transactions, cashOperations, deleteDriver } = useApp();
   const [selectedDriver, setSelectedDriver] = useState<DriverType | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -28,6 +29,8 @@ const Drivers = () => {
   const [lastEditDate, setLastEditDate] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [driverToDelete, setDriverToDelete] = useState<DriverType | null>(null);
 
   const { updateDriver } = useApp();
 
@@ -835,6 +838,19 @@ const Drivers = () => {
                           >
                             <Package className="w-4.5 h-4.5" />
                           </Button>
+                          
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-slate-400 hover:text-red-600 hover:bg-red-50"
+                            title="Supprimer le Chauffeur"
+                            onClick={() => {
+                              setDriverToDelete(driver);
+                              setDeleteDialogOpen(true);
+                            }}
+                          >
+                            <UserX className="w-4.5 h-4.5" />
+                          </Button>
                         </div>
                       </TableCell>
                     </TableRow>
@@ -1248,6 +1264,31 @@ const Drivers = () => {
           </div>
         </DialogContent>
       </Dialog>
+      
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Supprimer le chauffeur</AlertDialogTitle>
+            <AlertDialogDescription>
+              Cette action va supprimer définitivement ce chauffeur de la liste. Les autres données ne seront pas modifiées.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Annuler</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (driverToDelete) {
+                  await deleteDriver(driverToDelete.id);
+                  setDriverToDelete(null);
+                }
+                setDeleteDialogOpen(false);
+              }}
+            >
+              Supprimer
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

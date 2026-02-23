@@ -173,6 +173,7 @@ interface AppContextType {
   updateDriverDebt: (driverId: string, delta: number) => Promise<void>;
   // Enregistre le paiement et ajuste la dette et les avances selon le montant
   recordDriverPayment: (driverId: string, amount: number) => Promise<void>;
+  deleteDriver: (id: string) => Promise<void>;
   updateBrand: (id: string, patch: Partial<Brand>) => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
   trucks: Truck[];
@@ -601,6 +602,13 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const created = await supabaseService.create<Driver>("drivers", newDriver);
       if (created) {
         setDrivers(prev => [...prev, created]);
+      }
+    };
+  
+    const deleteDriver = async (id: string) => {
+      const success = await supabaseService.delete("drivers", String(id));
+      if (success) {
+        setDrivers(prev => prev.filter(d => String(d.id) !== String(id)));
       }
     };
   
@@ -1843,6 +1851,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     updateDriver,
     updateDriverDebt,
     recordDriverPayment,
+    deleteDriver,
     updateBrand,
     deleteBrand,
     trucks,
