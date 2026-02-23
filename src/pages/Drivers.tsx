@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
+import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { fr } from 'date-fns/locale';
@@ -19,7 +20,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 const Drivers = () => {
-  const { drivers, bottleTypes, transactions, cashOperations, deleteDriver } = useApp();
+  const { drivers, bottleTypes, transactions, cashOperations, deleteDriver, canDeleteDriver } = useApp();
   const [selectedDriver, setSelectedDriver] = useState<DriverType | null>(null);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
@@ -839,18 +840,29 @@ const Drivers = () => {
                             <Package className="w-4.5 h-4.5" />
                           </Button>
                           
+                          {(() => {
+                            const check = canDeleteDriver(driver.id);
+                            return (
                           <Button
                             variant="ghost"
                             size="icon"
                             className="text-slate-400 hover:text-red-600 hover:bg-red-50"
-                            title="Supprimer le Chauffeur"
+                            title={check.allowed ? "Supprimer le Chauffeur" : `Suppression indisponible: ${check.reason}`}
+                            disabled={!check.allowed}
                             onClick={() => {
+                              const rule = canDeleteDriver(driver.id);
+                              if (!rule.allowed) {
+                                toast(`Impossible de supprimer: ${rule.reason}`);
+                                return;
+                              }
                               setDriverToDelete(driver);
                               setDeleteDialogOpen(true);
                             }}
                           >
                             <UserX className="w-4.5 h-4.5" />
                           </Button>
+                            );
+                          })()}
                         </div>
                       </TableCell>
                     </TableRow>

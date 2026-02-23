@@ -174,6 +174,8 @@ interface AppContextType {
   // Enregistre le paiement et ajuste la dette et les avances selon le montant
   recordDriverPayment: (driverId: string, amount: number) => Promise<void>;
   deleteDriver: (id: string) => Promise<void>;
+  canDeleteDriver: (driverId: string) => { allowed: boolean; reason?: string };
+  deleteDriver: (id: string) => Promise<void>;
   updateBrand: (id: string, patch: Partial<Brand>) => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
   trucks: Truck[];
@@ -602,6 +604,29 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       const created = await supabaseService.create<Driver>("drivers", newDriver);
       if (created) {
         setDrivers(prev => [...prev, created]);
+      }
+    };
+  
+    const canDeleteDriver = (driverId: string) => {
+      const d = drivers.find(dr => String(dr.id) === String(driverId));
+      if (!d) return { allowed: true };
+      const debt = Math.abs(d.debt || 0);
+      const rcTotal = Object.values(d.remainingBottles || {}).reduce((a, b) => a + b, 0);
+      const hasActiveTruck = trucks.find(t => String(t.driverId) === String(driverId) && t.isActive);
+      if (debt > 0) return { allowed: false, reason: "Dette en cours" };
+      if (rcTotal > 0) return { allowed: false, reason: "Bouteilles R.C non restituées" };
+      if (hasActiveTruck) return { allowed: false, reason: "Assoccié à un camion actif" };
+      return { allowed: true };
+    };
+  
+    const deleteDriver = async (id: string) => {
+      const check = canDeleteDriver(id);
+      if (!check.allowed) {
+        return;
+      }
+      const success = await supabaseService.delete("drivers", String(id));
+      if (success) {
+        setDrivers(prev => prev.filter(d => String(d.id) !== String(id)));
       }
     };
   
@@ -1851,6 +1876,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     updateDriver,
     updateDriverDebt,
     recordDriverPayment,
+    deleteDriver,
+    canDeleteDriver,
     deleteDriver,
     updateBrand,
     deleteBrand,
