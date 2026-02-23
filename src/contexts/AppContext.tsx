@@ -311,9 +311,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [financialTransactions, setFinancialTransactions] = useState<FinancialTransaction[]>([]);
   const [stockHistory, setStockHistory] = useState<StockHistory[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // Bootstrap financial data from Supabase on app start
   React.useEffect(() => {
+    if (!currentUserId) return;
     (async () => {
       try {
         const [txs, ops, bts, revs] = await Promise.all([
@@ -328,7 +331,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
         if (Array.isArray(revs)) setRevenues(revs);
       } catch {}
     })();
-  }, []);
+  }, [currentUserId]);
   const [expenseTypes, setExpenseTypes] = useState<string[]>(['bureau', 'salaire', 'cnss', 'loyer', 'charger dépôt', 'équipement', 'électricité', 'transport', 'autre']);
 
   const normalizeAccount = (value?: string) => {
@@ -343,7 +346,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
   const [roles, setRoles] = useState<Role[]>(defaultRoles);
   const [roleAssignments, setRoleAssignments] = useState<RoleAssignment[]>([]);
-  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  // Moved currentUserEmail and currentUserId to top of component to avoid ReferenceError
   const currentRole = React.useMemo(() => {
     if (!currentUserEmail) return null;
     const assignment = roleAssignments.find(a => a.email.toLowerCase() === currentUserEmail.toLowerCase());
@@ -390,9 +393,11 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     supabase.auth.getSession().then(({ data }) => {
       if (!active) return;
       setCurrentUserEmail(data.session?.user?.email ?? null);
+      setCurrentUserId(data.session?.user?.id ?? null);
     });
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       setCurrentUserEmail(session?.user?.email ?? null);
+      setCurrentUserId(session?.user?.id ?? null);
     });
     return () => {
       active = false;
@@ -402,6 +407,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   // Fetch initial data from Supabase
   useEffect(() => {
+    if (!currentUserId) return;
     const fetchData = async () => {
        const [
          clientsData,
@@ -513,7 +519,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
      };
 
     fetchData();
-  }, []);
+  }, [currentUserId]);
 
     const addExpenseType = async (type: string) => {
       if (!expenseTypes.includes(type)) {
