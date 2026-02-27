@@ -114,7 +114,7 @@ export const AddTruckDialog = ({ trigger }: AddTruckDialogProps) => {
                     <span>Remorque</span>
                   </span>
                 </SelectItem>
-                  <SelectItem value="petit-camion" className="rounded-lg">🚚 Petit Camion</SelectItem>
+                <SelectItem value="petit-camion" className="rounded-lg">🚚 Allogaz</SelectItem>
                 </SelectContent>
             </Select>
           </div>

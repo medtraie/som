@@ -471,7 +471,7 @@ const Trucks = () => {
                                <span>Remorque</span>
                              </span>
                            ) : 
-                           '🚚 Petit Camion'}
+                           '🚚 Allogaz'}
                         </Badge>
                       </TableCell>
                       <TableCell>

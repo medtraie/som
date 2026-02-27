@@ -31,7 +31,7 @@ const PetitCamion = () => {
     if (!selectedTruckId || !selectedDriverId) {
       toast({
         title: "Sélection requise",
-        description: "Veuillez sélectionner un petit camion et un chauffeur",
+        description: "Veuillez sélectionner Allogaz et un chauffeur",
         variant: "destructive",
       });
       return;
@@ -48,7 +48,7 @@ const PetitCamion = () => {
     if (!selectedTruckId || !selectedDriverId) {
       toast({
         title: "Sélection requise",
-        description: "Veuillez sélectionner un petit camion et un chauffeur",
+        description: "Veuillez sélectionner Allogaz et un chauffeur",
         variant: "destructive",
       });
       return;
@@ -62,7 +62,7 @@ const PetitCamion = () => {
     if (!latestSupplyOrder) {
       toast({
         title: "Aucun bon de sortie trouvé",
-        description: "Aucun bon de sortie trouvé pour ce chauffeur. Veuillez d'abord alimenter le petit camion.",
+        description: "Aucun bon de sortie trouvé pour ce chauffeur. Veuillez d'abord alimenter Allogaz.",
         variant: "destructive",
       });
       return;
@@ -86,8 +86,8 @@ const PetitCamion = () => {
       <div className="flex items-center gap-3 mb-6">
         <Truck className="w-8 h-8 text-primary" />
         <div>
-          <h1 className="text-3xl font-bold">PETIT CAMION</h1>
-          <p className="text-muted-foreground">Gestion des Petits Camions</p>
+          <h1 className="text-3xl font-bold">ALLOGAZ</h1>
+          <p className="text-muted-foreground">Gestion Allogaz</p>
         </div>
       </div>
 
@@ -96,20 +96,20 @@ const PetitCamion = () => {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Users className="w-5 h-5" />
-            Sélection du Petit Camion et du Chauffeur
+            Sélection Allogaz et Chauffeur
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="truck-select">Petit Camion</Label>
+              <Label htmlFor="truck-select">Allogaz</Label>
               <Select value={selectedTruckId} onValueChange={setSelectedTruckId}>
                 <SelectTrigger id="truck-select">
-                  <SelectValue placeholder="Sélectionner un petit camion" />
+                  <SelectValue placeholder="Sélectionner Allogaz" />
                 </SelectTrigger>
                 <SelectContent>
                   {petitCamionTrucks.length === 0 && (
-                    <SelectItem disabled value="none">Aucun petit camion disponible</SelectItem>
+                    <SelectItem disabled value="none">Aucun Allogaz disponible</SelectItem>
                   )}
                   {petitCamionTrucks.map(truck => {
                     const driver = drivers.find(d => d.id === truck.driverId);
@@ -145,7 +145,7 @@ const PetitCamion = () => {
               <h3 className="font-medium mb-2">Sélection actuelle:</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                 <div>
-                  <span className="font-medium">Petit Camion:</span> {selectedTruck.matricule}
+                  <span className="font-medium">Allogaz:</span> {selectedTruck.matricule}
                 </div>
                 <div>
                   <span className="font-medium">Chauffeur:</span> {selectedDriver.name}
@@ -210,7 +210,7 @@ const PetitCamion = () => {
                 size="lg"
               >
                 <ArrowRight className="w-4 h-4" />
-                Alimenter un Petit Camion
+                Alimenter Allogaz
               </Button>
               
               <Button
@@ -221,7 +221,7 @@ const PetitCamion = () => {
                 size="lg"
               >
                 <ArrowLeft className="w-4 h-4" />
-                Retour un Petit Camion
+                Retour Allogaz
               </Button>
             </div>
           </div>

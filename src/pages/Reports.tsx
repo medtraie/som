@@ -1064,7 +1064,7 @@ const Reports = () => {
 
       // 2. Identify if this is a "Camion" or "Petit Camion" row
       const isCamion = trucks.some(t => t.driverId === driver.id && t.truckType === 'camion');
-      const typeLabel = isCamion ? 'Camion' : 'Petit Camion';
+      const typeLabel = isCamion ? 'Camion' : 'Allogaz';
       const totalUnits = quantities['3kg'] + quantities['6kg'] + quantities['12kg'] + quantities['34kg'] + quantities['bng'];
       const totalAmount = cheque + espece;
 
@@ -1171,7 +1171,7 @@ const Reports = () => {
         ? 'Tous'
         : drivers.find((d) => d.id === dailyReportDriver)?.name || 'Inconnu';
     const generatedAt = new Date().toLocaleString('fr-FR');
-    addPdfHeader(doc, `Rapport Journalier Petit Camion - Bons d'Entrée (B.D)`, [
+    addPdfHeader(doc, `Rapport Journalier Allogaz - Bons d'Entrée (B.D)`, [
       `Date du rapport: ${selectedDate}`,
       `Chauffeur: ${driverName} | Généré le: ${generatedAt}`,
     ]);
@@ -2775,7 +2775,7 @@ const Reports = () => {
                       </Button>
                       <Button onClick={generateDailyPetitCamionReport} className="w-full" variant="outline">
                           <Download className="w-4 h-4 mr-2" />
-                          Rapport Petit Camion (B.D)
+                          Rapport Allogaz (B.D)
                       </Button>
                       <Button onClick={generateMygazReport} className="w-full" variant="secondary">
                           <Download className="w-4 h-4 mr-2" />

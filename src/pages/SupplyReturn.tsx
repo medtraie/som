@@ -217,6 +217,28 @@ const SupplyReturn = () => {
     return Math.max(totalStored - distributed, 0);
   };
   
+  const sortedBottleTypes = useMemo(() => {
+    const desiredOrder = ["butane12kg", "butane3kg", "butane6kg", "bng12kg", "propane34kg", "detendeurclicon"];
+    const normalize = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const keyFor = (name: string) => {
+      const n = normalize(name);
+      if (n.includes("butane") && n.includes("12kg")) return "butane12kg";
+      if (n.includes("butane") && n.includes("3kg")) return "butane3kg";
+      if (n.includes("butane") && n.includes("6kg")) return "butane6kg";
+      if (n.includes("bng") && n.includes("12kg")) return "bng12kg";
+      if (n.includes("propane") && n.includes("34kg")) return "propane34kg";
+      if (n.includes("detendeur") || n.includes("clic")) return "detendeurclicon";
+      return "";
+    };
+    return [...bottleTypes].sort((a, b) => {
+      const ai = desiredOrder.indexOf(keyFor(a.name));
+      const bi = desiredOrder.indexOf(keyFor(b.name));
+      const aIdx = ai === -1 ? 1000 + bottleTypes.indexOf(a) : ai;
+      const bIdx = bi === -1 ? 1000 + bottleTypes.indexOf(b) : bi;
+      return aIdx - bIdx;
+    });
+  }, [bottleTypes]);
+  
   const handleQuantityChange = (bottleTypeId: string, field: 'empty' | 'full', value: string) => {
     const raw = parseInt(value) || 0;
     const bottleType = bottleTypes.find(bt => bt.id === bottleTypeId);
@@ -295,7 +317,7 @@ const SupplyReturn = () => {
     if (selectionType === 'petit-camion' && (!selectedTruckId || !selectedDriverId)) {
       toast({
         title: "Sélection requise",
-        description: "Veuillez sélectionner un petit camion et un chauffeur",
+        description: "Veuillez sélectionner Allogaz et un chauffeur",
         variant: "destructive",
       });
       return;
@@ -513,7 +535,7 @@ const SupplyReturn = () => {
         drawInfoLabel('Client', order.clientName, 112, 85);
       } else if (order.truckId) {
         const truck = trucks.find(t => t.id === order.truckId);
-        drawInfoLabel('Petit Camion', truck ? truck.matricule : 'N/A', 112, 85);
+        drawInfoLabel('Allogaz', truck ? truck.matricule : 'N/A', 112, 85);
       }
 
       // Products Table
@@ -1082,7 +1104,7 @@ const SupplyReturn = () => {
                       <SelectItem value="existing">Chauffeur / Client existant</SelectItem>
                       <SelectItem value="new-driver">Nouveau chauffeur</SelectItem>
                       <SelectItem value="new-client">Nouveau client</SelectItem>
-                      <SelectItem value="petit-camion">Petit Camion</SelectItem>
+                      <SelectItem value="petit-camion">Allogaz</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1126,6 +1148,7 @@ const SupplyReturn = () => {
                         selected={orderDate}
                         onSelect={(date) => date && setOrderDate(date)}
                         initialFocus
+                        locale={fr}
                         className="bg-white p-4"
                       />
                     </PopoverContent>
@@ -1143,19 +1166,19 @@ const SupplyReturn = () => {
                   >
                     <div className="font-semibold text-indigo-900 flex items-center gap-2 mb-2">
                       <Truck className="w-4 h-4 text-indigo-600" />
-                      Détails du Petit Camion
+                      Détails Allogaz
                     </div>
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label htmlFor="petit-camion-select">Petit Camion</Label>
+                        <Label htmlFor="petit-camion-select">Allogaz</Label>
                         <Select value={selectedTruckId} onValueChange={setSelectedTruckId}>
                           <SelectTrigger id="petit-camion-select" className="bg-white border-indigo-200">
                             <SelectValue placeholder="Sélectionner un camion" />
                           </SelectTrigger>
                           <SelectContent>
                             {trucks.filter(t => t.truckType === 'petit-camion').length === 0 && (
-                              <SelectItem disabled value="none">Aucun petit camion disponible</SelectItem>
+                              <SelectItem disabled value="none">Aucun Allogaz disponible</SelectItem>
                             )}
                             {trucks.filter(t => t.truckType === 'petit-camion').map(truck => {
                               const driver = drivers.find(d => d.id === truck.driverId);
@@ -1323,7 +1346,7 @@ const SupplyReturn = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {bottleTypes.map((bt, idx) => {
+                    {sortedBottleTypes.map((bt, idx) => {
                       const currentItem = items.find(i => i.bottleTypeId === bt.id);
                       const fullQty = currentItem?.fullQuantity ?? 0;
                       const amount = currentItem?.amount ?? 0;
@@ -1505,7 +1528,7 @@ const SupplyReturn = () => {
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0">
-                          <CalendarComponent mode="single" selected={startDate} onSelect={setStartDate} />
+                      <CalendarComponent mode="single" selected={startDate} onSelect={setStartDate} locale={fr} />
                         </PopoverContent>
                       </Popover>
                       <Popover>
@@ -1516,7 +1539,7 @@ const SupplyReturn = () => {
                           </Button>
                         </PopoverTrigger>
                         <PopoverContent className="w-auto p-0">
-                          <CalendarComponent mode="single" selected={endDate} onSelect={setEndDate} />
+                      <CalendarComponent mode="single" selected={endDate} onSelect={setEndDate} locale={fr} />
                         </PopoverContent>
                       </Popover>
                     </div>

@@ -1,6 +1,16 @@
 import { supabase } from "./supabaseClient";
 
 const toSnakeKey = (key: string) => key.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
+const currentUserId = async (): Promise<string | null> => {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.user?.id ?? null;
+  } catch {
+    return null;
+  }
+};
+const hasUserIdColumnError = (message?: string) =>
+  (message || '').toLowerCase().includes('user_id');
 const toCamelKey = (key: string) => {
   const camel = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
   const lower = camel.toLowerCase();
@@ -296,6 +306,25 @@ const normalizeRow = (table: string, row: Record<string, any>) => {
 export const supabaseService = {
   // Generic Fetch
   async getAll<T>(table: string): Promise<T[]> {
+    const uid = await currentUserId();
+    if (uid) {
+      const { data, error } = await supabase.from(table).select("*").eq("user_id", uid);
+      if (!error) {
+        if (data && data.length && !tableColumnHints[table]) {
+          tableColumnHints[table] = Object.keys(data[0] as Record<string, any>);
+        }
+        return (data ?? []).map((row) => {
+          const camel = toCamelShallow(row as Record<string, any>);
+          return normalizeRow(table, camel);
+        }) as T[];
+      }
+      if (hasUserIdColumnError(error.message)) {
+        console.error(`Missing user_id column for ${table}; user-scoped read blocked.`);
+        return [];
+      }
+      console.error(`Error fetching from ${table}:`, error.message);
+      return [];
+    }
     const { data, error } = await supabase.from(table).select("*");
     if (error) {
       console.error(`Error fetching from ${table}:`, error.message);
@@ -312,7 +341,9 @@ export const supabaseService = {
 
   // Generic Create
   async create<T>(table: string, item: Partial<T>): Promise<T | null> {
-    let payload = toWritePayload(table, item as Record<string, any>);
+    const uid = await currentUserId();
+    const nextItem = uid ? { ...(item as Record<string, any>), user_id: uid } : (item as Record<string, any>);
+    let payload = toWritePayload(table, nextItem);
     if (!Object.keys(payload).length) return null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       console.log(`Creating in ${table}, attempt ${attempt + 1}, payload keys:`, Object.keys(payload));
@@ -328,6 +359,10 @@ export const supabaseService = {
         return null;
       }
       const missingCol = match[1];
+      if (uid && missingCol === 'user_id') {
+        console.error(`Missing user_id column for ${table}; user-scoped insert blocked.`);
+        return null;
+      }
       console.log(`Stripping missing column: ${missingCol}`);
       payload = stripMissingColumn(payload, missingCol);
       if (!Object.keys(payload).length) return null;
@@ -338,27 +373,33 @@ export const supabaseService = {
 
   // Generic Update
   async update<T>(table: string, id: string | number, patch: Partial<T>): Promise<T | null> {
+    const uid = await currentUserId();
     let payload = toWritePayload(table, patch as Record<string, any>);
     if (!Object.keys(payload).length) return null;
     for (let attempt = 0; attempt < 20; attempt += 1) {
       console.log(`Updating ${table} ${id}, attempt ${attempt + 1}, payload keys:`, Object.keys(payload));
-      const { data, error } = await supabase
+      let response = await supabase
         .from(table)
         .update(payload)
         .eq("id", id)
+        .eq(uid ? "user_id" : "id", uid ?? id)
         .select()
         .single();
-      if (!error) {
-        const camel = toCamelShallow(data as Record<string, any>);
+      if (!response.error) {
+        const camel = toCamelShallow(response.data as Record<string, any>);
         return normalizeRow(table, camel) as T;
       }
-      console.warn(`Update error in ${table}:`, error.message);
-      const match = error.message.match(missingColumnRegex);
+      console.warn(`Update error in ${table}:`, response.error.message);
+      const match = response.error.message.match(missingColumnRegex);
       if (!match) {
-        console.error(`Error updating ${table}:`, error.message);
+        console.error(`Error updating ${table}:`, response.error.message);
         return null;
       }
       const missingCol = match[1];
+      if (uid && missingCol === 'user_id') {
+        console.error(`Missing user_id column for ${table}; user-scoped update blocked.`);
+        return null;
+      }
       console.log(`Stripping missing column: ${missingCol}`);
       payload = stripMissingColumn(payload, missingCol);
       if (!Object.keys(payload).length) return null;
@@ -369,9 +410,18 @@ export const supabaseService = {
 
   // Generic Delete
   async delete(table: string, id: string | number): Promise<boolean> {
-    const { error } = await supabase.from(table).delete().eq("id", id);
-    if (error) {
-      console.error(`Error deleting from ${table}:`, error.message);
+    const uid = await currentUserId();
+    let response = await supabase
+      .from(table)
+      .delete()
+      .eq("id", id)
+      .eq(uid ? "user_id" : "id", uid ?? id);
+    if (response.error) {
+      if (uid && hasUserIdColumnError(response.error.message)) {
+        console.error(`Missing user_id column for ${table}; user-scoped delete blocked.`);
+        return false;
+      }
+      console.error(`Error deleting from ${table}:`, response.error.message);
       return false;
     }
     return true;
@@ -379,7 +429,11 @@ export const supabaseService = {
 
   // Bulk Upsert (useful for syncing/migration)
   async upsertMany<T>(table: string, items: T[]): Promise<void> {
-    let payloads = items.map((item) => toWritePayload(table, item as Record<string, any>));
+    const uid = await currentUserId();
+    const nextItems = uid
+      ? items.map((item) => ({ ...(item as Record<string, any>), user_id: uid }))
+      : items;
+    let payloads = nextItems.map((item) => toWritePayload(table, item as Record<string, any>));
     for (let attempt = 0; attempt < 20; attempt += 1) {
       console.log(`Upserting many in ${table}, attempt ${attempt + 1}, keys:`, Object.keys(payloads[0] || {}));
       const { error } = await supabase.from(table).upsert(payloads);
@@ -391,6 +445,10 @@ export const supabaseService = {
         return;
       }
       const missingCol = match[1];
+      if (uid && missingCol === 'user_id') {
+        console.error(`Missing user_id column for ${table}; user-scoped upsert blocked.`);
+        return;
+      }
       console.log(`Stripping missing column: ${missingCol}`);
       payloads = stripMissingColumnMany(payloads, missingCol);
       if (!payloads.length || !Object.keys(payloads[0]).length) {
