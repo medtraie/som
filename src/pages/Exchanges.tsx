@@ -133,7 +133,7 @@ const Exchanges = () => {
 
   const getForeignStockByCompany = (companyName: string) => {
     return foreignBottles
-      .filter(fb => fb.companyName === companyName && fb.type === 'normal')
+      .filter(fb => fb.companyName === companyName && (fb.type === 'normal' || !fb.type))
       .reduce((acc, fb) => {
         const existing = acc.find(item => item.bottleType === fb.bottleType);
         if (existing) {
@@ -147,13 +147,13 @@ const Exchanges = () => {
 
   const getTotalForeignStockByCompany = (companyName: string) => {
     return foreignBottles
-      .filter(fb => fb.companyName === companyName && fb.type === 'normal')
+      .filter(fb => fb.companyName === companyName && (fb.type === 'normal' || !fb.type))
       .reduce((sum, fb) => sum + fb.quantity, 0);
   };
 
   const getForeignStockForBottleTypeAndCompany = (bottleTypeName: string, companyName: string) => {
     return foreignBottles
-      .filter(fb => fb.bottleType === bottleTypeName && fb.companyName === companyName && fb.type === 'normal')
+      .filter(fb => fb.bottleType === bottleTypeName && fb.companyName === companyName && (fb.type === 'normal' || !fb.type))
       .reduce((sum, fb) => sum + fb.quantity, 0);
   };
 
@@ -689,8 +689,8 @@ const Exchanges = () => {
       {/* Stock adjustment dialog */}
       {selectedBottleType && (
         <AddForeignBottleDialog
-          isOpen={addForeignDialogOpen}
-          onClose={() => setAddForeignDialogOpen(false)}
+          open={addForeignDialogOpen}
+          onOpenChange={setAddForeignDialogOpen}
           bottleType={selectedBottleType}
         />
       )}

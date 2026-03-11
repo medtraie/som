@@ -239,8 +239,8 @@ export const RecordReturnDialog: React.FC<RecordReturnDialogProps> = ({ open, on
           distributedQuantity: newDistributed,
         });
         const foreignEntries = foreignDetailsByItem[item.bottleTypeId] || [];
-        foreignEntries.forEach(fb => addForeignBottle({ returnOrderId: newReturnOrderId, companyName: fb.companyName, bottleType: fb.bottleType, quantity: fb.quantity, date: new Date().toISOString() }));
-        if (foreignEntries.length === 0 && (item.foreignQuantity || 0) > 0) addForeignBottle({ returnOrderId: newReturnOrderId, companyName: 'Autre', bottleType: item.bottleTypeName, quantity: item.foreignQuantity || 0, date: new Date().toISOString() });
+        foreignEntries.forEach(fb => addForeignBottle({ returnOrderId: newReturnOrderId, companyName: fb.companyName, bottleType: fb.bottleType, quantity: fb.quantity, type: 'normal', date: new Date().toISOString() }));
+        if (foreignEntries.length === 0 && (item.foreignQuantity || 0) > 0) addForeignBottle({ returnOrderId: newReturnOrderId, companyName: 'Autre', bottleType: item.bottleTypeName, quantity: item.foreignQuantity || 0, type: 'normal', date: new Date().toISOString() });
         if ((item.defectiveQuantity || 0) > 0) addDefectiveBottle({ returnOrderId: newReturnOrderId, bottleTypeId: item.bottleTypeId, bottleTypeName: item.bottleTypeName, quantity: item.defectiveQuantity || 0, date: new Date().toISOString() });
       });
 

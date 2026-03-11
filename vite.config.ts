@@ -14,7 +14,16 @@ export default defineConfig(({ mode }) => ({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "robots.txt", "remorque-logo.svg", "placeholder.svg"],
+      includeAssets: [
+        "favicon.ico",
+        "robots.txt",
+        "favicon-16x16.png",
+        "favicon-32x32.png",
+        "apple-touch-icon.png",
+        "android-chrome-192x192.png",
+        "android-chrome-512x512.png",
+        "maskable-512x512.png"
+      ],
       manifest: {
         name: "Gaz Maroc",
         short_name: "GazMaroc",
@@ -25,9 +34,12 @@ export default defineConfig(({ mode }) => ({
         theme_color: "#0f172a",
         background_color: "#ffffff",
         icons: [
-          { src: "/remorque-logo.svg", sizes: "512x512", type: "image/svg+xml", purpose: "any" },
-          { src: "/placeholder.svg", sizes: "512x512", type: "image/svg+xml", purpose: "maskable" },
-          { src: "/favicon.ico", sizes: "64x64 32x32 24x24 16x16", type: "image/x-icon" }
+          { src: "/android-chrome-192x192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/android-chrome-512x512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+          { src: "/maskable-512x512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+          { src: "/apple-touch-icon.png", sizes: "180x180", type: "image/png", purpose: "any" },
+          { src: "/favicon-32x32.png", sizes: "32x32", type: "image/png", purpose: "any" },
+          { src: "/favicon-16x16.png", sizes: "16x16", type: "image/png", purpose: "any" }
         ],
       },
     }),

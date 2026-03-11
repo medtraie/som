@@ -27,6 +27,7 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { Revenue } from '@/types';
+import { supabaseService } from '@/lib/supabaseService';
 
 const Reports = () => {
   const { transactions, bottleTypes, trucks, drivers, exchanges, expenses, revenues, returnOrders, supplyOrders, repairs } = useApp();
@@ -37,7 +38,8 @@ const Reports = () => {
   const [selectedFilter, setSelectedFilter] = useState('all');
   const [selectedTruck, setSelectedTruck] = useState('all');
   const [selectedDriver, setSelectedDriver] = useState('all');
-  const [dailyReportDate, setDailyReportDate] = useState(new Date());
+  const [dailyStartDate, setDailyStartDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [dailyEndDate, setDailyEndDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [dailyReportDriver, setDailyReportDriver] = useState('all');
   const [stockSearch, setStockSearch] = useState('');
   const [driverSearch, setDriverSearch] = useState('');
@@ -47,8 +49,26 @@ const Reports = () => {
   const [transactionsSort, setTransactionsSort] = useState<'date_desc' | 'date_asc' | 'value_desc' | 'value_asc'>('date_desc');
   const [transactionsLimit, setTransactionsLimit] = useState<'25' | '50' | '100' | 'all'>('50');
   const [expandedTransactionId, setExpandedTransactionId] = useState<string | null>(null);
+  const [showReference, setShowReference] = useState(true);
+  const [factoryOps, setFactoryOps] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  React.useEffect(() => {
+    (async () => {
+      const ops = await supabaseService.getAll<any>('factory_operations');
+      setFactoryOps(ops || []);
+    })();
+  }, []);
+  React.useEffect(() => {
+    (async () => {
+      const list = await supabaseService.getAll<any>('suppliers');
+      setSuppliers(list || []);
+    })();
+  }, []);
 
   // Filter transactions based on selected criteria
+  const getTransactionValue = (t: any) =>
+    Number(t?.totalValue ?? t?.totalvalue ?? t?.value ?? t?.amount ?? t?.montant ?? t?.totalAmount ?? 0) || 0;
+
   const filteredTransactions = transactions.filter(transaction => {
     const transactionDate = new Date(transaction.date);
     const startDate = dateFilter.startDate ? new Date(dateFilter.startDate) : null;
@@ -56,7 +76,13 @@ const Reports = () => {
 
     if (startDate && transactionDate < startDate) return false;
     if (endDate && transactionDate > endDate) return false;
-    if (selectedFilter !== 'all' && transaction.type !== selectedFilter) return false;
+    if (selectedFilter !== 'all') {
+      if (selectedFilter === 'factory') {
+        if (!String(transaction.type || '').includes('factory')) return false;
+      } else {
+        if (transaction.type !== selectedFilter) return false;
+      }
+    }
     if (selectedTruck !== 'all' && transaction.truckId !== selectedTruck) return false;
     if (selectedDriver !== 'all' && transaction.driverId !== selectedDriver) return false;
 
@@ -87,18 +113,18 @@ const Reports = () => {
   });
 
   // Calculate metrics
-  const totalValue = filteredTransactions.reduce((sum, t) => sum + (t.totalValue || 0), 0);
+  const totalValue = filteredTransactions.reduce((sum, t) => sum + getTransactionValue(t), 0);
   const transactionsByType = {
     supply: filteredTransactions.filter(t => t.type === 'supply').length,
     return: filteredTransactions.filter(t => t.type === 'return').length,
     exchange: filteredTransactions.filter(t => t.type === 'exchange').length,
-    factory: filteredTransactions.filter(t => t.type === 'factory').length,
+    factory: filteredTransactions.filter(t => String(t.type || '').includes('factory')).length,
   };
 
   const sortedTransactions = React.useMemo(() => {
     const list = [...filteredTransactions] as any[];
     const getTime = (t: any) => new Date(t?.date || 0).getTime();
-    const getValue = (t: any) => Number(t?.totalValue || 0);
+    const getValue = (t: any) => getTransactionValue(t);
     list.sort((a, b) => {
       if (transactionsSort === 'date_desc') return getTime(b) - getTime(a);
       if (transactionsSort === 'date_asc') return getTime(a) - getTime(b);
@@ -188,8 +214,24 @@ const Reports = () => {
   };
 
 
+  const parseDateStr = (s?: string) => (s ? new Date(`${s}T00:00:00`) : null);
+  const inRange = (d: Date) => {
+    const s = parseDateStr(dailyStartDate);
+    const e = parseDateStr(dailyEndDate);
+    const dTime = d.getTime();
+    if (s && dTime < s.getTime()) return false;
+    if (e && dTime > new Date(`${dailyEndDate}T23:59:59.999`).getTime()) return false;
+    return true;
+  };
+
+  const periodLabel = (() => {
+    const s = dailyStartDate || '';
+    const e = dailyEndDate || dailyStartDate || '';
+    return s && e ? `${s} → ${e}` : (s || e || '');
+  })();
+
   const generateDailyExpenseReport = (currentExpenses: any[]) => {
-    const reportDate = dailyReportDate.toISOString().slice(0, 10);
+    const reportDate = periodLabel;
     const doc = new jsPDF();
     const generatedAt = new Date().toLocaleString('fr-FR');
 
@@ -201,12 +243,13 @@ const Reports = () => {
     doc.text('Rapport Journalier des Notes de Frais', 14, 22);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Date du rapport: ${reportDate}`, 14, 30);
+    doc.text(`Période: ${reportDate}`, 14, 30);
     doc.text(`Généré le: ${generatedAt}`, 14, 35);
 
-    const dailyExpenses = currentExpenses.filter(expense => 
-      expense.date.slice(0, 10) === reportDate && expense.type === 'note de frais'
-    );
+    const dailyExpenses = currentExpenses.filter(expense => {
+      const d = new Date(expense.date);
+      return inRange(d) && expense.type === 'note de frais';
+    });
     if (dailyExpenses.length === 0) {
       doc.setTextColor(30, 41, 59);
       doc.setFontSize(12);
@@ -335,7 +378,7 @@ const Reports = () => {
   };
 
   const generateDriverDebtReport = () => {
-    const reportDate = dailyReportDate.toISOString().slice(0, 10);
+    const reportDate = periodLabel;
     const doc = new jsPDF();
     const generatedAt = new Date().toLocaleString('fr-FR');
 
@@ -347,7 +390,7 @@ const Reports = () => {
     doc.text('Rapport des Dettes des Chauffeurs', 14, 22);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Date du rapport: ${reportDate}`, 14, 30);
+    doc.text(`Période: ${reportDate}`, 14, 30);
     doc.text(`Généré le: ${generatedAt}`, 14, 35);
 
     const driversWithDebt = drivers.filter(driver => driver.debt > 0);
@@ -427,7 +470,7 @@ const Reports = () => {
   };
 
   const generateMiscellaneousExpensesReport = () => {
-    const reportDate = dailyReportDate.toISOString().slice(0, 10);
+    const reportDate = periodLabel;
     const doc = new jsPDF();
     const generatedAt = new Date().toLocaleString('fr-FR');
 
@@ -439,12 +482,13 @@ const Reports = () => {
     doc.text('Rapport des Dépenses Diverses', 14, 22);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Date du rapport: ${reportDate}`, 14, 30);
+    doc.text(`Période: ${reportDate}`, 14, 30);
     doc.text(`Généré le: ${generatedAt}`, 14, 35);
 
-    const dailyExpenses = expenses.filter(expense => 
-      expense.date.slice(0, 10) === reportDate && !expense.returnOrderId
-    );
+    const dailyExpenses = expenses.filter(expense => {
+      const d = new Date(expense.date);
+      return inRange(d) && !expense.returnOrderId;
+    });
 
     if (dailyExpenses.length === 0) {
       doc.setTextColor(30, 41, 59);
@@ -520,7 +564,7 @@ const Reports = () => {
   };
 
   const generateTransportReport = () => {
-    const reportDate = dailyReportDate.toISOString().slice(0, 10);
+    const reportDate = periodLabel;
     const doc = new jsPDF();
     const generatedAt = new Date().toLocaleString('fr-FR');
 
@@ -532,7 +576,7 @@ const Reports = () => {
     doc.text('Rapport Journalier des Dépenses de Transport', 14, 22);
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Date du rapport: ${reportDate}`, 14, 30);
+    doc.text(`Période: ${reportDate}`, 14, 30);
     doc.text(`Généré le: ${generatedAt}`, 14, 35);
 
     // مقارنة التاريخ باليوم المحلي لمنع مشكلات المنطقة الزمنية
@@ -545,7 +589,7 @@ const Reports = () => {
     const transportExpenses = expenses.filter(expense => {
       const expDate = new Date(expense.date);
       const type = (expense.type || '').toLowerCase().trim();
-      return isSameDay(expDate, dailyReportDate) && type === 'transport';
+      return inRange(expDate) && type === 'transport';
     });
   
     if (transportExpenses.length === 0) {
@@ -638,7 +682,7 @@ const Reports = () => {
   };
 
   const generateGeneralReport = () => {
-    const reportDate = dailyReportDate.toISOString().slice(0, 10);
+    const reportDate = periodLabel;
     const doc = new jsPDF();
     let currentY = 20;
 
@@ -647,7 +691,7 @@ const Reports = () => {
     doc.text(`Rapport Général Journalier`, 14, currentY);
     currentY += 10;
     doc.setFontSize(12);
-    doc.text(`Date: ${reportDate}`, 14, currentY);
+    doc.text(`Période: ${reportDate}`, 14, currentY);
     currentY += 15;
 
     const isSameDay = (d1: Date, d2: Date) =>
@@ -656,16 +700,17 @@ const Reports = () => {
       d1.getDate() === d2.getDate();
 
     // 1. Dépenses Diverses Total
-    const dailyMiscExpenses = expenses.filter(expense => 
-      expense.date.slice(0, 10) === reportDate && !expense.returnOrderId
-    );
+    const dailyMiscExpenses = expenses.filter(expense => {
+      const d = new Date(expense.date);
+      return inRange(d) && !expense.returnOrderId;
+    });
     const totalMisc = dailyMiscExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
     // 2. Transport Total
     const transportExpenses = expenses.filter(expense => {
       const expDate = new Date(expense.date);
       const type = (expense.type || '').toLowerCase().trim();
-      return isSameDay(expDate, dailyReportDate) && type === 'transport';
+      return inRange(expDate) && type === 'transport';
     });
     const totalTransport = transportExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
@@ -684,8 +729,8 @@ const Reports = () => {
     drivers.forEach((driver) => {
       const driverReturnOrders = (returnOrders || []).filter((o: any) => {
         if (!o || !o.date) return false;
-        const d = (o.date || '').slice(0, 10);
-        return o.driverId === driver.id && d === reportDate;
+        const d = new Date(o.date);
+        return o.driverId === driver.id && inRange(d);
       });
 
       driverReturnOrders.forEach((order: any) => {
@@ -694,8 +739,8 @@ const Reports = () => {
 
         const relatedRevenues = (revenues || []).filter((r: Revenue) => {
           if (r.relatedOrderId !== order.id || r.relatedOrderType !== 'return') return false;
-          const rDate = (r.date || '').slice(0, 10);
-          return rDate === reportDate;
+          const rD = new Date(r.date);
+          return inRange(rD);
         });
         
         if (relatedRevenues.length > 0) {
@@ -738,13 +783,13 @@ const Reports = () => {
   };
 
   const generateDiversesReport = () => {
-    const selectedDate = dailyReportDate.toISOString().split('T')[0];
+    const selectedDate = periodLabel;
     const doc = new jsPDF();
 
     doc.setFontSize(16);
     doc.text(`Rapport Ventes Diverses`, 14, 16);
     doc.setFontSize(10);
-    doc.text(`Date: ${selectedDate}`, 14, 22);
+    doc.text(`Période: ${selectedDate}`, 14, 22);
 
     const CONSIGNE_FEES: Record<string, number> = {
       'Butane 12KG': 50,
@@ -761,8 +806,8 @@ const Reports = () => {
 
     driversToReport.forEach((driver) => {
       const driverReturnOrders = (returnOrders || []).filter((o: any) => {
-        const d = (o.date || '').slice(0, 10);
-        return o.driverId === driver.id && d === selectedDate;
+        const d = new Date(o.date || '');
+        return o.driverId === driver.id && inRange(d);
       });
 
       driverReturnOrders.forEach((order: any) => {
@@ -805,17 +850,17 @@ const Reports = () => {
       doc.text("Aucune vente de consigne trouvée pour cette sélection.", 14, 40);
     }
 
-    doc.save(`rapport_diverses_${selectedDate}.pdf`);
+    doc.save(`rapport_diverses_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
   };
 
   const generateRepairsReport = () => {
-    const selectedDate = dailyReportDate.toISOString().split('T')[0];
+    const selectedDate = periodLabel;
     const doc = new jsPDF();
 
     doc.setFontSize(16);
     doc.text(`Rapport des Réparations`, 14, 16);
     doc.setFontSize(10);
-    doc.text(`Date: ${selectedDate}`, 14, 22);
+    doc.text(`Période: ${selectedDate}`, 14, 22);
 
     const tableColumn = ['Véhicule', 'Type', 'Coût Total', 'Payé', 'Dette', 'Remarque'];
     const tableRows: any[] = [];
@@ -824,7 +869,7 @@ const Reports = () => {
     let totalPaidSum = 0;
     let totalDebtSum = 0;
 
-    const dailyRepairs = (repairs || []).filter(r => r.date.slice(0, 10) === selectedDate);
+    const dailyRepairs = (repairs || []).filter(r => inRange(new Date(r.date)));
 
     dailyRepairs.forEach(repair => {
       const truck = trucks.find(t => t.id === repair.truckId);
@@ -865,7 +910,7 @@ const Reports = () => {
       doc.text("Aucune réparation trouvée pour cette date.", 14, 40);
     }
 
-    doc.save(`rapport_reparations_${selectedDate}.pdf`);
+    doc.save(`rapport_reparations_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
   };
 
   const truckHealthAnalysis = trucks.map(truck => {
@@ -980,7 +1025,7 @@ const Reports = () => {
 
   const generateCombinedDriversReport = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
-    const selectedDate = dailyReportDate.toISOString().split('T')[0];
+    const selectedDate = periodLabel;
     const driverName =
       dailyReportDriver === 'all'
         ? 'Tous'
@@ -988,7 +1033,7 @@ const Reports = () => {
 
     const generatedAt = new Date().toLocaleString('fr-FR');
     addPdfHeader(doc, `Rapport Journalier des Chauffeurs`, [
-      `Date du rapport: ${selectedDate}`,
+      `Période: ${selectedDate}`,
       `Chauffeur: ${driverName} | Généré le: ${generatedAt}`,
     ]);
 
@@ -1021,16 +1066,16 @@ const Reports = () => {
       dailyReportDriver === 'all' ? drivers : drivers.filter((d) => d.id === dailyReportDriver);
 
     driversToReport.forEach((driver) => {
-      // 1. Petit Camion Data (All return orders for this driver today)
+      // Bons d'entrée (B.D) ضمن الفترة
       const driverReturnOrders = (returnOrders || []).filter((o: any) => {
         if (!o || !o.date) return false;
-        const d = (o.date || '').slice(0, 10);
-        return o.driverId === driver.id && d === selectedDate;
+        const d = new Date(o.date);
+        return o.driverId === driver.id && inRange(d);
       });
 
       const driverRevenues = (revenues || []).filter((r: any) => {
-        const rDate = (r.date || '').slice(0, 10);
-        if (rDate !== selectedDate) return false;
+        const rD = new Date(r.date || '');
+        if (!inRange(rD)) return false;
         if (r.relatedOrderType !== 'return' || !r.relatedOrderId) return false;
         const ro = (returnOrders || []).find((o: any) => o.id === r.relatedOrderId);
         return ro?.driverId === driver.id;
@@ -1160,19 +1205,19 @@ const Reports = () => {
       doc.text("Aucune donnée pour cette sélection.", 14, 52);
     }
 
-    doc.save(`rapport_journalier_chauffeurs_${selectedDate}.pdf`);
+    doc.save(`rapport_journalier_chauffeurs_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
   };
 
   const generateDailyPetitCamionReport = () => {
     const doc = new jsPDF({ orientation: 'landscape' });
-    const selectedDate = dailyReportDate.toISOString().split('T')[0];
+    const selectedDate = periodLabel;
     const driverName =
       dailyReportDriver === 'all'
         ? 'Tous'
         : drivers.find((d) => d.id === dailyReportDriver)?.name || 'Inconnu';
     const generatedAt = new Date().toLocaleString('fr-FR');
     addPdfHeader(doc, `Rapport Journalier Allogaz - Bons d'Entrée (B.D)`, [
-      `Date du rapport: ${selectedDate}`,
+      `Période: ${selectedDate}`,
       `Chauffeur: ${driverName} | Généré le: ${generatedAt}`,
     ]);
   
@@ -1207,13 +1252,12 @@ const Reports = () => {
       const driverReturnOrders = (returnOrders || []).filter((o: any) => {
         if (!o || !o.date) return false;
         const d = new Date(o.date);
-        return o.driverId === driver.id && d.toDateString() === dailyReportDate.toDateString();
+        return o.driverId === driver.id && inRange(d);
       });
   
-      const dailyDateString = selectedDate;
       const driverRevenues = (revenues || []).filter((r: any) => {
-        const rDate = (r.date || '').slice(0, 10);
-        if (rDate !== dailyDateString) return false;
+        const rD = new Date(r.date || '');
+        if (!inRange(rD)) return false;
         if (r.relatedOrderType !== 'return' || !r.relatedOrderId) return false;
         const ro = (returnOrders || []).find((o: any) => o.id === r.relatedOrderId);
         return ro?.driverId === driver.id;
@@ -1335,7 +1379,7 @@ const Reports = () => {
     });
     addPdfPageNumbers(doc);
 
-    doc.save(`rapport_petit_camion_${selectedDate}.pdf`);
+    doc.save(`rapport_petit_camion_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
   };
 
   // 1. Analysis of Foreign Bottles by Driver
@@ -1848,7 +1892,7 @@ const Reports = () => {
 
   const generateMygazReport = () => {
     const doc = new jsPDF();
-    const selectedDate = dailyReportDate.toISOString().split('T')[0];
+    const selectedDate = periodLabel;
     const driverName =
       dailyReportDriver === 'all'
         ? 'Tous'
@@ -1856,7 +1900,7 @@ const Reports = () => {
 
     const generatedAt = new Date().toLocaleString('fr-FR');
     addPdfHeader(doc, `Rapport des Paiements MYGAZ`, [
-      `Date du rapport: ${selectedDate}`,
+      `Période: ${selectedDate}`,
       `Chauffeur: ${driverName} | Généré le: ${generatedAt}`,
     ]);
 
@@ -1876,8 +1920,8 @@ const Reports = () => {
     driversToReport.forEach((driver) => {
       const driverReturnOrders = (returnOrders || []).filter((o: any) => {
         if (!o || !o.date) return false;
-        const d = (o.date || '').slice(0, 10);
-        return o.driverId === driver.id && d === selectedDate;
+        const d = new Date(o.date);
+        return o.driverId === driver.id && inRange(d);
       });
 
       driverReturnOrders.forEach((order: any) => {
@@ -1886,8 +1930,8 @@ const Reports = () => {
 
         const relatedRevenues = (revenues || []).filter((r: Revenue) => {
           if (r.relatedOrderId !== order.id || r.relatedOrderType !== 'return') return false;
-          const rDate = (r.date || '').slice(0, 10);
-          return rDate === selectedDate;
+          const rD = new Date(r.date);
+          return inRange(rD);
         });
         
         let mygaz = 0;
@@ -1964,16 +2008,16 @@ const Reports = () => {
       doc.text("Aucun paiement MYGAZ trouvé pour cette sélection.", 14, 52);
     }
 
-    doc.save(`rapport_mygaz_${selectedDate}.pdf`);
+    doc.save(`rapport_mygaz_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
   };
 
   const generateDriversSupplyReturnReport = () => {
-    const selectedDate = dailyReportDate.toISOString().split('T')[0];
+    const selectedDate = periodLabel;
     const doc = new jsPDF({ orientation: 'landscape' });
     const driverFilterLabel = dailyReportDriver === 'all' ? 'Tous' : (drivers.find(d => d.id === dailyReportDriver)?.name || 'Inconnu');
     const generatedAt = new Date().toLocaleString('fr-FR');
     addPdfHeader(doc, `Historique des Bons d'Entrée (B.D) — Camions`, [
-      `Date du rapport: ${selectedDate}`,
+      `Période: ${selectedDate}`,
       `Filtre chauffeur: ${driverFilterLabel} | Généré le: ${generatedAt}`,
     ]);
 
@@ -2001,8 +2045,8 @@ const Reports = () => {
 
     driversToReport.forEach(driver => {
       const roForDriver = (returnOrders || []).filter((o: any) => {
-        const d = (o.date || '').slice(0, 10);
-        return d === selectedDate && o.driverId === driver.id;
+        const d = new Date(o.date || '');
+        return inRange(d) && o.driverId === driver.id;
       });
 
       roForDriver.forEach((order: any) => {
@@ -2023,8 +2067,8 @@ const Reports = () => {
         });
 
         const relatedRevenues = (revenues || []).filter((r: any) => {
-          const rDate = (r.date || '').slice(0, 10);
-          if (rDate !== selectedDate) return false;
+          const rD = new Date(r.date || '');
+          if (!inRange(rD)) return false;
           return r.relatedOrderType === 'return' && r.relatedOrderId === order.id;
         });
 
@@ -2118,7 +2162,190 @@ const Reports = () => {
     });
     addPdfPageNumbers(doc);
 
-    doc.save(`historique_bd_camions_${selectedDate}.pdf`);
+    doc.save(`historique_bd_camions_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
+  };
+  const generateFactoryReceptionReport = async () => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const selectedDate = periodLabel;
+    const driverName =
+      dailyReportDriver === 'all'
+        ? 'Tous'
+        : drivers.find((d) => d.id === dailyReportDriver)?.name || 'Inconnu';
+    const generatedAt = new Date().toLocaleString('fr-FR');
+    addPdfHeader(doc, `Réception Usine`, [
+      `Période: ${selectedDate}`,
+      `Chauffeur: ${driverName} | Généré le: ${generatedAt}`,
+    ]);
+
+    const mapBottleKey = (name?: string) => {
+      const n = (name || '').toLowerCase().replace(/\s+/g, '');
+      if (n.includes('bng')) return 'bng';
+      if (/(^|[^0-9])3kg($|[^0-9])/.test(n) || /3\s*kg/.test((name || '').toLowerCase())) return '3kg';
+      if (/(^|[^0-9])6kg($|[^0-9])/.test(n) || /6\s*kg/.test((name || '').toLowerCase())) return '6kg';
+      if (/(^|[^0-9])12kg($|[^0-9])/.test(n) || /12\s*kg/.test((name || '').toLowerCase())) return '12kg';
+      if (/(^|[^0-9])34kg($|[^0-9])/.test(n) || /34\s*kg/.test((name || '').toLowerCase())) return '34kg';
+      return '';
+    };
+
+    const suppliers = await supabaseService.getAll<any>('suppliers');
+    const operations = await supabaseService.getAll<any>('factory_operations');
+    const driverFilter = dailyReportDriver;
+    const ops = (operations || []).filter((op: any) => {
+      if (!op || !op.receivedBottles || (op.receivedBottles || []).length === 0) return false;
+      const rd = new Date(op.receivedDate || op.date);
+      if (!inRange(rd)) return false;
+      if (driverFilter === 'all') return true;
+      const selectedDriverName = drivers.find(d => d.id === driverFilter)?.name || '';
+      const byName = (op.driverName || '').toLowerCase() === selectedDriverName.toLowerCase();
+      const byTruck = (trucks.find(t => t.id === op.truckId)?.driverId || '') === driverFilter;
+      return byName || byTruck;
+    });
+
+    const tableColumn = ['Chauffeur', 'Réf BL', 'Fournisseur', 'Date Réception', '3kg', '6kg', '12kg', '34kg', 'BNG', 'Montant (DH)', 'Total unités'];
+    const tableRows: any[] = [];
+    let sum3 = 0, sum6 = 0, sum12 = 0, sum34 = 0, sumBNG = 0, sumAmount = 0, sumUnits = 0;
+
+    ops.forEach((op: any) => {
+      const supplierName = suppliers.find((s: any) => String(s.id) === String(op.supplierId))?.name || (op.supplierId || '-');
+      const driverLabel = op.driverName || (drivers.find(d => d.id === (trucks.find(t => t.id === op.truckId)?.driverId))?.name || '—');
+      const rd = op.receivedDate ? new Date(op.receivedDate) : (op.date ? new Date(op.date) : null);
+      const rdLabel = rd ? `${rd.getFullYear()}-${String(rd.getMonth()+1).padStart(2,'0')}-${String(rd.getDate()).padStart(2,'0')}` : '';
+
+      const quantities: Record<'3kg' | '6kg' | '12kg' | '34kg' | 'bng', number> = { '3kg': 0, '6kg': 0, '12kg': 0, '34kg': 0, 'bng': 0 };
+      (op.receivedBottles || []).forEach((item: any) => {
+        const bt = bottleTypes.find(b => b.id === item.bottleTypeId);
+        const key = mapBottleKey(bt?.name || '');
+        const qty = Number(item.quantity || 0);
+        if (key && quantities[key as keyof typeof quantities] !== undefined) {
+          quantities[key as keyof typeof quantities] += qty;
+        }
+      });
+      const totalUnits = quantities['3kg'] + quantities['6kg'] + quantities['12kg'] + quantities['34kg'] + quantities['bng'];
+      const amountCalc = (op.receivedBottles || []).reduce((acc: number, item: any) => {
+        const bt = bottleTypes.find(b => b.id === item.bottleTypeId);
+        const unit = Number(
+          (bt as any)?.purchasePrice ??
+          (bt as any)?.unitPrice ??
+          (bt as any)?.price ??
+          (bt as any)?.cost ??
+          0
+        );
+        const qty = Number(item.quantity || 0);
+        return acc + unit * qty;
+      }, 0);
+      const txCandidates = (transactions || []).filter((t: any) => t.type === 'factory_reception');
+      const parsedTx = txCandidates.map((t: any) => {
+        const raw = t.details ?? t.detail ?? t.meta ?? t.data;
+        let det: any = undefined;
+        if (typeof raw === 'string') { try { det = JSON.parse(raw); } catch { det = undefined; } }
+        else if (raw && typeof raw === 'object') det = raw;
+        const td = new Date(t.date || 0).getTime();
+        const tRef = String(t.reference || t.ref || '');
+        const tTruckId = String(t.truckId || det?.truckId || det?.truck_id || '');
+        const tDriverId = String(t.driverId || det?.driverId || det?.driver_id || '');
+        return { t, det, td, tRef, tTruckId, tDriverId, value: getTransactionValue(t) };
+      });
+      const od = rd ? rd.getTime() : new Date(op.date || 0).getTime();
+      const dFromTruck = trucks.find(tr => String(tr.id) === String(op.truckId || ''))?.driverId;
+      const strictMatches = parsedTx.filter(x => {
+        const byOp = x.det?.operationId && String(x.det.operationId) === String(op.id);
+        const byRef = op.blReference && (x.tRef === String(op.blReference));
+        const bySupplier = !x.t.supplierId || String(x.t.supplierId) === String(op.supplierId);
+        return (byOp || byRef) && bySupplier;
+      });
+      let amountFromTx = 0;
+      if (strictMatches.length > 0) {
+        amountFromTx = strictMatches.reduce((s, x) => s + (Number(x.value) || 0), 0);
+      } else {
+        const fuzzy = parsedTx.filter(x => {
+          const bySupplier = !x.t.supplierId || String(x.t.supplierId) === String(op.supplierId);
+          const byTime = Math.abs(x.td - od) <= 2 * 60 * 60 * 1000;
+          const byTruck = x.tTruckId && String(x.tTruckId) === String(op.truckId || '');
+          const byDriver = dFromTruck && x.tDriverId && String(x.tDriverId) === String(dFromTruck);
+          return bySupplier && byTime && (byTruck || byDriver);
+        });
+        if (fuzzy.length > 0) {
+          const closest = [...fuzzy].sort((a, b) => Math.abs(a.td - od) - Math.abs(b.td - od))[0];
+          const sameRef = fuzzy.filter(x => x.tRef && x.tRef === closest.tRef);
+          const group = sameRef.length > 0 ? sameRef : [closest];
+          amountFromTx = group.reduce((s, x) => s + (Number(x.value) || 0), 0);
+        }
+      }
+      const amount = amountFromTx > 0 ? amountFromTx : amountCalc;
+
+      tableRows.push([
+        driverLabel,
+        op.blReference || '',
+        supplierName,
+        rdLabel,
+        quantities['3kg'],
+        quantities['6kg'],
+        quantities['12kg'],
+        quantities['34kg'],
+        quantities['bng'],
+        amount.toFixed(2),
+        totalUnits,
+      ]);
+
+      sum3 += quantities['3kg'];
+      sum6 += quantities['6kg'];
+      sum12 += quantities['12kg'];
+      sum34 += quantities['34kg'];
+      sumBNG += quantities['bng'];
+      sumAmount += amount;
+      sumUnits += totalUnits;
+    });
+
+    if (tableRows.length === 0) {
+      doc.setFontSize(12);
+      doc.text("Aucune réception usine trouvée pour cette sélection.", 14, 52);
+      doc.save(`reception_usine_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
+      return;
+    }
+
+    tableRows.sort((a, b) => {
+      const au = Number(a[10] || 0);
+      const bu = Number(b[10] || 0);
+      if (!isNaN(au) && !isNaN(bu) && au !== bu) return bu - au; // Total unités desc
+      const av = Number(a[9] || 0);
+      const bv = Number(b[9] || 0);
+      if (!isNaN(av) && !isNaN(bv) && av !== bv) return bv - av; // tie-breaker by Montant desc
+      return String(a[0] || '').localeCompare(String(b[0] || ''), 'fr');
+    });
+    tableRows.push([
+      'TOTAL',
+      '',
+      '',
+      '',
+      sum3,
+      sum6,
+      sum12,
+      sum34,
+      sumBNG,
+      sumAmount.toFixed(2),
+      sumUnits,
+    ]);
+
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 46,
+      theme: 'grid',
+      headStyles: { fillColor: pdfHeaderColor as any, textColor: [255, 255, 255], fontStyle: 'bold' },
+      styles: { fontSize: 9, cellPadding: 2 },
+      columnStyles: {
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+        6: { halign: 'right' },
+        7: { halign: 'right' },
+        8: { halign: 'right' },
+        9: { halign: 'right' },
+        10: { halign: 'right', fontStyle: 'bold' },
+      },
+    });
+    addPdfPageNumbers(doc);
+    doc.save(`reception_usine_${(dailyStartDate || '').replaceAll('-','')}_${(dailyEndDate || dailyStartDate || '').replaceAll('-','')}.pdf`);
   };
   // عادة بناء واجهة صفحة التقارير داخل return
   return (
@@ -2548,7 +2775,14 @@ const Reports = () => {
                         setExpandedTransactionId(null);
                       }}
                     >
-                      {showTransactions ? 'Masquer' : 'Afficher'}
+                      {showTransactions ? 'Cacher' : 'Afficher'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowReference(v => !v)}
+                    >
+                      {showReference ? 'Cacher Référence' : 'Afficher Référence'}
                     </Button>
                     <Select value={transactionsSort} onValueChange={(v) => setTransactionsSort(v as any)}>
                       <SelectTrigger className="h-9 w-[170px]">
@@ -2610,7 +2844,7 @@ const Reports = () => {
                                         <th className="p-3">Type</th>
                                         <th className="p-3">Chauffeur</th>
                                         <th className="p-3">Client</th>
-                                        <th className="p-3">Référence</th>
+                                        {showReference && <th className="p-3">Référence</th>}
                                         <th className="p-3">Camion</th>
                                         <th className="p-3 text-right">Valeur (MAD)</th>
                                         <th className="p-3 text-center">Détails</th>
@@ -2618,9 +2852,28 @@ const Reports = () => {
                             </thead>
                             <tbody>
                                 {visibleTransactions.map((t: any) => {
-                                    const dName = drivers.find((d) => d.id === t.driverId)?.name || '-';
-                                    const trk = trucks.find((tr) => tr.id === t.truckId) as any;
-                                    const tName = (trk?.name || trk?.plateNumber || trk?.registration || '-') as string;
+                                    let dName = drivers.find((d) => d.id === t.driverId)?.name || '-';
+                                    const rawDetails = t.details ?? t.detail ?? t.meta ?? t.data;
+                                    let parsedDetails: any = undefined;
+                                    if (typeof rawDetails === 'string') {
+                                      try {
+                                        parsedDetails = JSON.parse(rawDetails);
+                                      } catch {
+                                        parsedDetails = undefined;
+                                      }
+                                    } else if (rawDetails && typeof rawDetails === 'object') {
+                                      parsedDetails = rawDetails;
+                                    }
+                                    const detailTruckId = parsedDetails?.truckId ?? parsedDetails?.truck_id;
+                                    const detailTruckName =
+                                      parsedDetails?.truckName ??
+                                      parsedDetails?.truck ??
+                                      parsedDetails?.camion ??
+                                      parsedDetails?.plateNumber ??
+                                      parsedDetails?.registration;
+
+                                    const trk = trucks.find((tr) => String(tr.id) === String(t.truckId || detailTruckId)) as any;
+                                    let tName = (trk?.name || trk?.plateNumber || trk?.registration || trk?.matricule || detailTruckName || '-') as string;
 
                                     const supplyOrder = t.type === 'supply'
                                       ? supplyOrders.find((o: any) => o.id === t.relatedOrderId || o.orderNumber === t.relatedOrderId)
@@ -2629,21 +2882,91 @@ const Reports = () => {
                                       ? returnOrders.find((o: any) => o.id === t.relatedOrderId || o.orderNumber === t.relatedOrderId)
                                       : undefined;
 
+                                    const isFactoryType =
+                                      t.type === 'factory' ||
+                                      t.type === 'factory_reception' ||
+                                      t.type === 'factory_invoice' ||
+                                      t.type === 'factory_settlement';
+
                                     let cName = '-';
                                     if (supplyOrder) cName = supplyOrder.clientName || '-';
-                                    if (returnOrder) cName = returnOrder.clientName || '-';
+                                    else if (returnOrder) cName = returnOrder.clientName || '-';
+                                    else if (isFactoryType) {
+                                      const supplierId = t.supplierId || parsedDetails?.supplierId || parsedDetails?.supplier_id;
+                                      if (supplierId) {
+                                        const sup = suppliers.find(s => String(s.id) === String(supplierId));
+                                        cName = sup?.name || '-';
+                                      }
+                                    }
 
+                                    const detailRef =
+                                      parsedDetails?.reference ??
+                                      parsedDetails?.ref ??
+                                      parsedDetails?.orderNumber ??
+                                      parsedDetails?.blReference ??
+                                      parsedDetails?.bl ??
+                                      parsedDetails?.id;
                                     const rawRef = String(
                                       supplyOrder?.orderNumber ||
                                       returnOrder?.orderNumber ||
+                                      t.orderNumber ||
+                                      t.reference ||
+                                      t.ref ||
+                                      detailRef ||
                                       t.relatedOrderId ||
                                       t.id ||
                                       ''
                                     );
-                                    const ref = rawRef ? rawRef : '-';
+                                    let ref = rawRef ? rawRef : '-';
                                     const dateLabel = t?.date
                                       ? new Date(t.date).toLocaleString('fr-FR', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
                                       : '-';
+
+                                    if (isFactoryType && (tName === '-' || !rawRef || ref === '-' || dName === '-')) {
+                                      const td = new Date(t.date || 0).getTime();
+                                      const match = factoryOps.find((op: any) => {
+                                        const od = new Date(op.receivedDate || op.date).getTime();
+                                        const diff = Math.abs(od - td);
+                                        const supplierMatch = !t.supplierId || String(op.supplierId || '') === String(t.supplierId);
+                                        const refMatch = !!rawRef && rawRef !== '-' && op.blReference && String(op.blReference) === String(rawRef);
+                                        const opIdMatch = parsedDetails?.operationId && String(op.id) === String(parsedDetails.operationId);
+                                        return refMatch || opIdMatch || (diff <= 2 * 60 * 60 * 1000 && supplierMatch);
+                                      });
+                                      if (match) {
+                                        const tr2 = trucks.find(tr => String(tr.id) === String(match.truckId)) as any;
+                                        const tName2 = (tr2?.name || tr2?.plateNumber || tr2?.registration || tr2?.matricule || '-') as string;
+                                        if (tName === '-' && tName2 !== '-') tName = tName2;
+                                        if ((!rawRef || rawRef === '-' || ref === '-') && match.blReference) ref = match.blReference;
+                                        if (dName === '-') {
+                                          const drvFromTruckId = tr2?.driverId;
+                                          if (drvFromTruckId) {
+                                            const drv = drivers.find(d => d.id === drvFromTruckId);
+                                            if (drv?.name) dName = drv.name;
+                                          } else if (match.driverName) {
+                                            dName = match.driverName;
+                                          }
+                                        }
+                                      }
+                                    }
+                                    if (dName === '-') {
+                                      const pdDriverId = parsedDetails?.driverId ?? parsedDetails?.driver_id;
+                                      if (pdDriverId) {
+                                        const drv = drivers.find(d => d.id === pdDriverId);
+                                        if (drv?.name) dName = drv.name;
+                                      } else {
+                                        const trForD = trucks.find(tr => tr.id === (t.truckId || detailTruckId)) as any;
+                                        const drv2Id = trForD?.driverId;
+                                        if (drv2Id) {
+                                          const drv2 = drivers.find(d => d.id === drv2Id);
+                                          if (drv2?.name) dName = drv2.name;
+                                        } else {
+                                          const nameHint = parsedDetails?.driverName ?? parsedDetails?.driver ?? parsedDetails?.chauffeur;
+                                          if (nameHint) dName = String(nameHint);
+                                        }
+                                      }
+                                    }
+
+                                    const valueNumber = getTransactionValue(t);
 
                                     const isExpanded = expandedTransactionId === t.id;
                                     const bottleBreakdown = (t.bottleTypes || []).map((bt: any) => {
@@ -2664,18 +2987,24 @@ const Reports = () => {
                                             <Badge variant="outline" className={
                                               t.type === 'supply' ? 'bg-blue-50 text-blue-700' : 
                                               t.type === 'return' ? 'bg-green-50 text-green-700' :
-                                              t.type === 'exchange' ? 'bg-orange-50 text-orange-700' : 'bg-gray-50'
+                                              t.type === 'exchange' ? 'bg-orange-50 text-orange-700' : 
+                                              t.type === 'factory_reception' ? 'bg-purple-50 text-purple-700' :
+                                              t.type === 'factory_invoice' ? 'bg-indigo-50 text-indigo-700' :
+                                              t.type === 'factory_settlement' ? 'bg-teal-50 text-teal-700' : 'bg-gray-50'
                                             }>
                                               {t.type === 'supply' ? 'Alimentation' : 
                                               t.type === 'return' ? 'Retour' :
-                                              t.type === 'exchange' ? 'Échange' : 'Usine'}
+                                              t.type === 'exchange' ? 'Échange' : 
+                                              t.type === 'factory_reception' ? 'Réception Usine' :
+                                              t.type === 'factory_invoice' ? 'Facture Usine' :
+                                              t.type === 'factory_settlement' ? 'Règlement Usine' : 'Usine'}
                                             </Badge>
                                           </td>
                                           <td className="p-3 font-medium">{dName}</td>
                                           <td className="p-3">{cName}</td>
-                                          <td className="p-3 font-mono text-xs">{ref}</td>
+                                        {showReference && <td className="p-3 font-mono text-xs">{ref}</td>}
                                           <td className="p-3">{tName}</td>
-                                          <td className="p-3 text-right font-bold">{(t.totalValue || 0).toFixed(2)}</td>
+                                        <td className="p-3 text-right font-bold">{valueNumber.toFixed(2)}</td>
                                           <td className="p-3 text-center">
                                             <Button
                                               variant="ghost"
@@ -2689,7 +3018,7 @@ const Reports = () => {
                                         </tr>
                                         {isExpanded && (
                                           <tr className="border-b bg-white">
-                                            <td className="p-3" colSpan={8}>
+                                        <td className="p-3" colSpan={showReference ? 8 : 7}>
                                               <div className="grid md:grid-cols-3 gap-3">
                                                 <div className="text-sm">
                                                   <div className="text-xs text-muted-foreground">Identifiant</div>
@@ -2697,7 +3026,7 @@ const Reports = () => {
                                                 </div>
                                                 <div className="text-sm">
                                                   <div className="text-xs text-muted-foreground">Total</div>
-                                                  <div className="font-bold">{(t.totalValue || 0).toFixed(2)} MAD</div>
+                                                  <div className="font-bold">{valueNumber.toFixed(2)} MAD</div>
                                                 </div>
                                                 <div className="text-sm">
                                                   <div className="text-xs text-muted-foreground">Bouteilles</div>
@@ -2722,7 +3051,7 @@ const Reports = () => {
                                 })}
                                 {visibleTransactions.length === 0 && (
                                   <tr>
-                                    <td className="p-4 text-center text-sm text-muted-foreground" colSpan={8}>
+                                    <td className="p-4 text-center text-sm text-muted-foreground" colSpan={showReference ? 8 : 7}>
                                       Aucune transaction pour ces filtres.
                                     </td>
                                   </tr>
@@ -2745,11 +3074,19 @@ const Reports = () => {
               <CardContent>
                   <div className="grid md:grid-cols-3 gap-4 mb-4">
                       <div>
-                          <Label>Date</Label>
+                          <Label>Début <span className="text-xs text-muted-foreground">(jj/mm/aaaa)</span></Label>
                           <Input
                               type="date"
-                              value={dailyReportDate.toISOString().slice(0, 10)}
-                              onChange={(e) => setDailyReportDate(new Date(e.target.value))}
+                              value={dailyStartDate}
+                              onChange={(e) => setDailyStartDate(e.target.value)}
+                          />
+                      </div>
+                      <div>
+                          <Label>Fin <span className="text-xs text-muted-foreground">(jj/mm/aaaa)</span></Label>
+                          <Input
+                              type="date"
+                              value={dailyEndDate}
+                              onChange={(e) => setDailyEndDate(e.target.value)}
                           />
                       </div>
                       <div>
@@ -2812,6 +3149,10 @@ const Reports = () => {
                       <Button onClick={generateRepairsReport} className="w-full bg-orange-600 hover:bg-orange-700 text-white">
                           <Download className="w-4 h-4 mr-2" />
                           Rapport Réparations PDF
+                      </Button>
+                      <Button onClick={generateFactoryReceptionReport} className="w-full" variant="outline">
+                          <Download className="w-4 h-4 mr-2" />
+                          Réception Usine
                       </Button>
                   </div>
               </CardContent>

@@ -576,7 +576,10 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const addBrand = async (brand: Brand) => {
-      const id = brand.id ?? (window.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
+      const providedId = typeof brand.id === 'string' ? brand.id.trim() : brand.id;
+      const id = providedId && String(providedId).length > 0
+        ? String(providedId)
+        : (window.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2));
       const newBrand = { ...brand, id };
       const created = await supabaseService.create<Brand>("brands", newBrand);
       if (created) {

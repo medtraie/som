@@ -716,6 +716,12 @@ const Factory = () => {
   const [factoryOperations, setFactoryOperations] = useState<FactoryOperation[]>([]);
   const [debtSettlements, setDebtSettlements] = useState<DebtSettlement[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [settlementUnlocked, setSettlementUnlocked] = useState<boolean>(() => {
+    try { return sessionStorage.getItem('factory_settlement_unlocked') === 'true'; } catch { return false; }
+  });
+  const [showCodeDialog, setShowCodeDialog] = useState(false);
+  const [codeInput, setCodeInput] = useState('');
+  const [pendingSettlementSupplierId, setPendingSettlementSupplierId] = useState<string | null>(null);
 
   // Statuts d'affichage des formulaires
   const [showSendForm, setShowSendForm] = useState(false);
@@ -932,6 +938,45 @@ const Factory = () => {
     updateSupplier(supplierId, { debts: updatedDebts });
   };
 
+  const onClickReglerDette = (supplierId: string) => {
+    if (!settlementUnlocked) {
+      setPendingSettlementSupplierId(supplierId);
+      setShowCodeDialog(true);
+      return;
+    }
+    setSettlementForm({ ...settlementForm, supplierId });
+    setShowSettlementForm(true);
+  };
+
+  const confirmUnlockSettlement = () => {
+    if (codeInput === '123456789A') {
+      setSettlementUnlocked(true);
+      try { sessionStorage.setItem('factory_settlement_unlocked', 'true'); } catch {}
+      setShowCodeDialog(false);
+      const sid = pendingSettlementSupplierId;
+      setPendingSettlementSupplierId(null);
+      setCodeInput('');
+      if (sid) {
+        setSettlementForm({ ...settlementForm, supplierId: sid });
+        setShowSettlementForm(true);
+      }
+    } else {
+      alert('Code invalide');
+    }
+  };
+
+  const resetSupplierDebtAll = async (kind: 'empty' | 'defective') => {
+    if (!window.confirm('Confirmer la remise à zéro ?')) return;
+    for (const s of safeSuppliers) {
+      const debts = (s.debts || []).map(d => ({
+        ...d,
+        emptyDebt: kind === 'empty' ? 0 : d.emptyDebt,
+        defectiveDebt: kind === 'defective' ? 0 : d.defectiveDebt
+      }));
+      await updateSupplier(s.id, { debts });
+    }
+  };
+
   const handleAddSupplier = () => {
     if (!newSupplierName.trim()) return;
     
@@ -1074,6 +1119,7 @@ const Factory = () => {
       date: sendForm.date ? sendForm.date.toISOString() : new Date().toISOString(),
       truckId: sendForm.truckId,
       supplierId: sendForm.supplierId,
+      blReference: sendForm.blReference,
       bottleTypes: sentBottles.map(b => ({
         bottleTypeId: b.bottleTypeId,
         quantity: b.quantity
@@ -1179,6 +1225,25 @@ const Factory = () => {
           note: `Réception Usine | ${noteParts}`
         });
 
+        // Add to global transactions
+        addTransaction({
+          type: 'factory_reception',
+          date: returnForm.date ? returnForm.date.toISOString() : new Date().toISOString(),
+          truckId: operation.truckId,
+          supplierId: operation.supplierId,
+          reference: operation.blReference || operation.id,
+          bottleTypes: [{
+            bottleTypeId: bottle.bottleTypeId,
+            quantity: qty,
+            status: 'received'
+          }],
+          description: `Réception Usine - ${qty} ${currentBT.name} | ${operation.blReference || operation.id}`,
+          totalValue: (Number(currentBT.purchasePrice) || 0) * qty,
+          details: {
+            operationId: operation.id,
+            blReference: operation.blReference
+          }
+        });
       }
     });
 
@@ -1255,6 +1320,21 @@ const Factory = () => {
     const created = await supabaseService.create<Invoice>('factory_invoices', newInvoice);
     if (created) {
       setInvoices(prev => [created, ...prev]);
+      
+      // Add to global transactions
+      addTransaction({
+        type: 'factory_invoice',
+        date: newInvoice.date,
+        supplierId: newInvoice.supplierId,
+        totalValue: newInvoice.totalAmount,
+        reference: newInvoice.id,
+        description: `Facture Usine - ${newInvoice.blReferences?.length || 0} BLs`,
+        details: {
+          blReferences: newInvoice.blReferences,
+          totalSent: newInvoice.totalSent,
+          totalReceived: newInvoice.totalReceived
+        }
+      });
     }
     setShowInvoiceForm(false);
     setSelectedBLsForInvoice([]);
@@ -1389,6 +1469,14 @@ const Factory = () => {
             </Card>
           </motion.div>
         ))}
+      </div>
+      <div className="flex justify-end gap-2 mt-2">
+        <Button variant="outline" size="sm" className="rounded-xl" onClick={() => resetSupplierDebtAll('empty')}>
+          Remise à zéro Dette (V)
+        </Button>
+        <Button variant="outline" size="sm" className="rounded-xl" onClick={() => resetSupplierDebtAll('defective')}>
+          Remise à zéro Défectueux
+        </Button>
       </div>
 
       {/* Send Form Dialog */}
@@ -1602,6 +1690,22 @@ const Factory = () => {
           </div>
         </DialogContent>
       </Dialog>
+      <Dialog open={showCodeDialog} onOpenChange={setShowCodeDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Autorisation</DialogTitle>
+            <DialogDescription>Entrer le code pour activer le règlement de dette</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Code</Label>
+            <Input value={codeInput} onChange={(e) => setCodeInput(e.target.value)} placeholder="**********" />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCodeDialog(false)}>Annuler</Button>
+            <Button onClick={confirmUnlockSettlement}>Valider</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add/Edit Supplier Dialog */}
       <Dialog open={showAddSupplier} onOpenChange={setShowAddSupplier}>
@@ -1733,10 +1837,7 @@ const Factory = () => {
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => {
-                            setSettlementForm({ ...settlementForm, supplierId: supplier.id });
-                            setShowSettlementForm(true);
-                          }}
+                          onClick={() => onClickReglerDette(supplier.id)}
                           className="rounded-xl border-emerald-200 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300"
                         >
                           <CheckCircle className="w-4 h-4 mr-2" />
